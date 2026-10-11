@@ -12,6 +12,8 @@ captures/
 
 # Lo que se genera al compilar (no se sube)
 *.apk
+# ...menos el APK publicado para descargar
+!releases/*.apk
 *.aab
 *.ap_
 *.dex

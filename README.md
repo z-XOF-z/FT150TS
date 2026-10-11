@@ -15,6 +15,8 @@ y está listo para una tarjeta **ESP32** en la moto.
 [![ESP32-S3][esp32-shield]](firmware/ft150ts_dashboard)
 [![Versión][version-shield]](LEEME.md)
 
+### [⬇ Descargar la app (APK v2.9)](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v2.9.apk)
+
 **[Qué hace](#qué-hace)** · **[Empezar](#empezar)** · **[La tarjeta ESP32](#la-tarjeta-esp32)** · **[Historial completo](LEEME.md)**
 
 </div>
@@ -61,7 +63,12 @@ directas) y la app se cambia sola.
 
 ## Empezar
 
-### 1. Compila e instala la app
+### 1. Instala la app
+
+**La rápida:** descarga [`FT150TS-v2.9.apk`](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v2.9.apk) en tu
+teléfono (Android 8.0 o más nuevo), ábrelo y permite "Instalar apps desconocidas".
+
+**Desde el código:**
 
 Abre esta carpeta en **Android Studio**, conecta el teléfono (depuración USB) y:
 
@@ -124,6 +131,7 @@ app/                      App de Android (Kotlin + Jetpack Compose)
 firmware/
   ft150ts_dashboard/      Firmware del ESP32-S3 (Arduino)
 docs/                     Banner animado, GIFs e imágenes
+releases/                 APK listo para instalar y notas de cada versión
 LEEME.md                  Guía completa e historial de versiones
 ```
 
