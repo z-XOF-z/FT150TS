@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Letras "FT" angulares en verde lima con una franja inclinada abajo -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <!-- F -->
+    <path android:fillColor="#9BE22B"
+        android:pathData="M32,36 L54,36 L50,43 L39,43 L39,50 L50,50 L47,56 L39,56 L39,72 L32,72 Z" />
+    <!-- T -->
+    <path android:fillColor="#9BE22B"
+        android:pathData="M56,36 L80,36 L77,43 L71,43 L71,72 L64,72 L64,43 L56,43 Z" />
+    <!-- franja inclinada -->
+    <path android:fillColor="#9BE22B"
+        android:pathData="M36,76 L80,76 L77,81 L33,81 Z" />
+    <!-- pixeles decorativos -->
+    <path android:fillColor="#B8C2C6"
+        android:pathData="M74,64 h4 v4 h-4 Z M74,58 h4 v4 h-4 Z" />
+</vector>

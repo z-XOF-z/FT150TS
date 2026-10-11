@@ -1,0 +1,28 @@
+# Gradle / Android Studio
+.gradle/
+build/
+app/build/
+app/release/
+local.properties
+.idea/
+*.iml
+captures/
+.externalNativeBuild/
+.cxx/
+
+# Lo que se genera al compilar (no se sube)
+*.apk
+*.aab
+*.ap_
+*.dex
+
+# Llaves de firma: NUNCA se suben
+*.jks
+*.keystore
+
+# Sistema
+.DS_Store
+Thumbs.db
+
+# Arduino / ESP32
+firmware/**/build/
