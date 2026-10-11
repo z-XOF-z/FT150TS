@@ -21,6 +21,22 @@ en los ajustes de Bluetooth: la app la busca y se conecta sola.
 
 Gira el teléfono a horizontal y las pantallas se acomodan solas.
 
+## Novedades v2.9.2 — el GPS ya no se queda "perdido"
+- **Se reconecta solo.** Si hay buena señal y las posiciones dejan de llegar (Android puede "congelar" el GPS de una
+  app al apagar la pantalla o mandarla a segundo plano), la app pide el GPS de nuevo **sin apagarlo** (primero la
+  petición nueva y luego suelta la vieja, así el chip no pierde los satélites): a los 10 s, 20 s, 40 s y luego cada
+  minuto, sin límite. Antes se rendía a los 5 intentos y volvía a pedir con el mismo listener, que Android trataba como
+  la misma petición congelada.
+- **Al regresar a la app o prender la pantalla** revisa el GPS y, si está callado, lo revive al instante (antes no
+  hacía nada si el GPS "ya estaba prendido").
+- **Respaldo con el GPS de Google** (Android 12+): el fusionado en alta precisión usa los mismos satélites; si el GPS
+  directo se calla pero Google tiene posición de satélite (±20 m o mejor, con velocidad y 4+ satélites fuertes), esa se
+  usa para todo: velocímetro, rodadas y odómetro siguen. El chip dice "· google".
+- El servicio de la moto se vuelve a poner con permiso de **ubicación** cada vez que abres la app (si Android lo había
+  reiniciado solo desde segundo plano, se quedaba sin él y el GPS se callaba con la pantalla apagada).
+- Una posición con la hora mal puesta ya no puede dejar al GPS rechazando todas las que siguen.
+- "Perdida hace 7199 s" ahora dice "hace 1 h 59 min", y la precisión vieja ya no se muestra como si fuera actual.
+
 ## Novedades v2.9.1 — el GPS dice la verdad bajo techo
 - Antes decía "buscando satélites (26 en uso)" adentro de la casa y parecía error. "En uso" engaña: los chips
   Qualcomm/Xiaomi marcan 20-30 satélites "en uso" aunque la señal no alcance para dar posición.

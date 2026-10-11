@@ -140,6 +140,7 @@ class MainActivity : ComponentActivity() {
         Dashcam.adjuntar(this)
         BleManager.primerPlano = true
         BleManager.conectar()
+        ServicioMoto.arrancar(this)    // vuelve a poner el servicio con permiso de ubicación (GPS con pantalla apagada)
     }
 
     override fun onResume() {

@@ -31,6 +31,7 @@ class ServicioMoto : Service() {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private var enPrimerPlano = false
+    private var textoActual = ""
 
     override fun onBind(intent: Intent?): IBinder? = null
 
@@ -38,7 +39,8 @@ class ServicioMoto : Service() {
         super.onCreate()
         Moto.iniciar(this)          // si Android reinició la app desde aquí, arranca todo
         crearCanal()
-        enPrimerPlano = ponerEnPrimerPlano(texto(Moto.conexion.value, Energia.enMoto.value))
+        textoActual = texto(Moto.conexion.value, Energia.enMoto.value)
+        enPrimerPlano = ponerEnPrimerPlano(textoActual)
         if (!enPrimerPlano) { stopSelf(); return }
         scope.launch {
             combine(Moto.conexion, Energia.enMoto, ModoSueno.dormido, ModoSueno.proximaRevision, ModoSueno.revisando) { c, m, d, prox, rev ->
@@ -59,6 +61,9 @@ class ServicioMoto : Service() {
             return START_NOT_STICKY
         }
         if (!enPrimerPlano) return START_NOT_STICKY
+        // Con la app en pantalla Android sí deja agregar "ubicación": si el servicio arrancó solo desde segundo plano
+        // (reinicio de Android) se quedó sin ella y el GPS se callaba con la pantalla apagada
+        if (BleManager.primerPlano) ponerEnPrimerPlano(textoActual)
         BleManager.conectar()
         return START_STICKY
     }
@@ -105,6 +110,7 @@ class ServicioMoto : Service() {
     }
 
     private fun actualizar(t: String) {
+        textoActual = t
         try {
             (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager).notify(ID, notificacion(t))
         } catch (_: Exception) { }
