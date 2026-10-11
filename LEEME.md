@@ -21,6 +21,26 @@ en los ajustes de Bluetooth: la app la busca y se conecta sola.
 
 Gira el teléfono a horizontal y las pantallas se acomodan solas.
 
+## Novedades v2.9 — rodadas, arrancones, lluvia en tu ruta, respaldo y sorpresas
+- **Rodadas** (página Moto): cada rodada se graba sola (con el cable de la moto, el motor o la tarjeta; sin ellos, solo
+  con la app en pantalla) y se cierra a los 5 min parado. Distancia, tiempo, en movimiento, velocidad máxima y promedio,
+  inclinación máxima. Tócala para verla en el **mapa pintado por velocidad** (verde < 25, amarillo, ámbar, rojo > 75)
+  y **repetirla** x10 / x30 / x60 con un rombo que recorre la ruta, o arrastra la barra. Se exporta como GPX.
+  Si la app se cierra a media rodada, se guarda lo que alcanzó a grabar.
+- **Aviso de descanso**: con 1.5 h rodando sin parar te sugiere una pausa por voz.
+- **Modo arrancones** (página Moto, solo en lugar cerrado y seguro): la salida se detecta con el acelerómetro (filtro
+  que ignora la vibración del motor, leído a la velocidad máxima del sensor) y los tiempos 0-40, 0-60, 0-80, 100 m y
+  1/8 de milla (201 m) se calculan entre lecturas del GPS. **Semáforo** opcional (3 ámbar + verde) con **tiempo de
+  reacción** y "salida en falso". Récords guardados.
+- **Prueba de frenado 40→0**: metros, segundos y frenada máxima en g.
+- **Lluvia en tu ruta** (Ajustes): rodando, cada 10 min revisa el pronóstico 4, 8, 12 y 16 km adelante en la dirección
+  en que vas y, con tu velocidad, si va a llover cuando pases. Aviso en el tablero y por voz.
+- **Velocímetro vs GPS** (página Moto): toca el número que marca la aguja (o dile al asistente "marca cuarenta") y se
+  compara con el GPS de los últimos 5 s. Con varias medidas te dice cuánto marca de más y a cuánto vas de verdad.
+- **Respaldo y restaurar** (Ajustes): todo en un archivo .json: guárdalo donde quieras, compártelo o deja el
+  automático semanal en Descargas/FT150TS. Al restaurar, la app se reinicia.
+- **Sorpresas**: 14 **logros pixel** (con aviso al ganarlos) y un **secreto escondido en el logo**.
+
 ## Novedades v2.8.1 — animación al entrar al tablero
 - Cada vez que entras al tablero (cambiando de página, al prender la pantalla o después de la animación FT150),
   como una moto de verdad al dar switch: una **franja a 45° del acento barre la pantalla**, la **barra / aguja de RPM
@@ -411,6 +431,13 @@ con datos simulados, sin la moto.
 | `ui/IconosApp.kt` | Íconos pixelados y accesos directos del tablero |
 | `ui/Barra.kt` | Barra integrada del tema Filo y tira de estado (hora, GPS, batería, clima) |
 | `ui/Arranque.kt` | Animación al entrar al tablero (barrido a 45° y RPM al tope) |
+| `Rodadas.kt` | Bitácora de rodadas, recorrido guardado y aviso de descanso |
+| `Arrancones.kt` | Modo arrancones, semáforo y prueba de frenado |
+| `LluviaRuta.kt` | Lluvia adelante en tu camino (Open-Meteo) |
+| `Velocimetro.kt` | Error del velocímetro contra el GPS |
+| `Respaldo.kt` | Respaldo y restaurar todos los datos |
+| `Logros.kt` | Logros pixel |
+| `ui/PantallaExtras.kt` | Pantallas de rodadas, arrancones, velocímetro, logros, respaldo y lluvia en ruta |
 | `Alertas.kt` | Huracanes (NHC), clima severo, sismos (USGS) y sus avisos |
 | `Estadisticas.kt` | Estadísticas de manejo y récords (0-40/60/80, g, marchas, RPM) |
 | `ui/AlertasUi.kt` | Franja de alerta del tablero y detalle de alertas |

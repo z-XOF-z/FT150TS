@@ -94,6 +94,24 @@ fun IconoAlertaPixel(tipo: TipoAlerta, color: Color, modifier: Modifier = Modifi
 fun AlertaClimaTablero(modifier: Modifier = Modifier) {
     val lista by AlertasManager.alertas.collectAsStateWithLifecycle()
     var abierto by remember { mutableStateOf(false) }
+    // Lluvia en tu ruta (adelante, en la dirección en que vas)
+    val ruta by com.xof.ft150ts.LluviaRuta.aviso.collectAsStateWithLifecycle()
+    ruta?.let { r ->
+        val color = Paleta.ambar
+        Row(
+            modifier.fillMaxWidth().clip(Formas.chica).background(color.copy(alpha = 0.14f))
+                .drawBehind { drawRect(color, Offset.Zero, Size(4.dp.toPx(), size.height)) }
+                .padding(start = 10.dp, end = 8.dp, top = 6.dp, bottom = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            IconoClimaPixel(IconoClima.LLUVIA, Modifier.size(24.dp))
+            Spacer(Modifier.width(8.dp))
+            Column(Modifier.weight(1f)) {
+                Text(if (r.km == 0) "Lluvia aquí" else "Lluvia adelante · ~${r.km} km", color = color, fontSize = 13.sp, fontWeight = FontWeight.Bold, maxLines = 1)
+                Text(if (r.km == 0) "Va a llover donde estás" else "Llegarías en ~${r.minutos} min por donde vas", color = Paleta.textoSec, fontSize = 11.sp, maxLines = 1)
+            }
+        }
+    }
     val a = lista.firstOrNull { it.nivel >= 2 }
     if (a != null) {
         val color = colorNivel(a.nivel)

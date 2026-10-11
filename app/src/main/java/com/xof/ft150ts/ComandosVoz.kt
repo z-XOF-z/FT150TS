@@ -93,6 +93,11 @@ object ComandosVoz {
                 if (Acciones.compartirUbicacion(ctx)) null else "Todavía no tengo tu ubicación"
             }
 
+            // ---------- Velocímetro contra GPS: "marca cuarenta" ----------
+            t.empiezaCon("marca", "el velocimetro marca", "velocimetro marca") != null && numeroDe(t) != null -> {
+                Velocimetro.medir(numeroDe(t)!!)
+            }
+
             // ---------- Datos ----------
             t.tiene("clima", "tiempo hace", "va a llover", "lluvia", "temperatura afuera") -> { ClimaManager.decir(); null }
             t.tiene("limite") -> textoLimite()
@@ -142,4 +147,19 @@ object ComandosVoz {
         if (r.gas < 0) return "No tengo el nivel de gasolina"
         return "Tienes ${r.gas} por ciento de gasolina" + if (v.autonomia >= 0) ", alcanza para unos ${v.autonomia} kilómetros" else ""
     }
+}
+
+/** Número de km/h dicho con dígitos o con palabras ("marca 40", "marca cuarenta y cinco"). */
+private fun numeroDe(t: String): Int? {
+    Regex("\\d{2,3}").find(t)?.let { return it.value.toInt().takeIf { n -> n in 10..160 } }
+    val decenas = mapOf("veinte" to 20, "treinta" to 30, "cuarenta" to 40, "cincuenta" to 50, "sesenta" to 60,
+        "setenta" to 70, "ochenta" to 80, "noventa" to 90, "cien" to 100)
+    val unidades = mapOf("uno" to 1, "dos" to 2, "tres" to 3, "cuatro" to 4, "cinco" to 5, "seis" to 6, "siete" to 7, "ocho" to 8, "nueve" to 9)
+    val palabras = t.split(" ")
+    for ((i, p) in palabras.withIndex()) {
+        val d = decenas[p] ?: continue
+        val u = if (palabras.getOrNull(i + 1) == "y") unidades[palabras.getOrNull(i + 2)] ?: 0 else 0
+        return d + u
+    }
+    return null
 }

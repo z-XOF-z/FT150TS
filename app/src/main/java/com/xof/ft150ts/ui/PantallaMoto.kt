@@ -80,18 +80,19 @@ fun PantallaMoto() {
         if (dosColumnas) {
             Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                 Columna(Modifier.weight(1f)) {
-                    SeccionViaje(); SeccionSensores(); SeccionManejo(); SeccionAltitud(); SeccionRalenti(); Graficas()
-                    SeccionBateriaTel()
+                    SeccionViaje(); SeccionRodadas(); SeccionSensores(); SeccionManejo(); SeccionAltitud(); SeccionRalenti(); Graficas()
+                    SeccionBateriaTel(); SeccionLogros()
                 }
                 Columna(Modifier.weight(1f)) {
-                    SeccionGasolina(); Mantenimientos(); SeccionControl(); SeccionTarjeta(); Consola()
+                    SeccionGasolina(); Mantenimientos(); SeccionArrancones(); SeccionVelocimetro(); SeccionControl(); SeccionTarjeta(); Consola()
                 }
             }
         } else {
             Columna(Modifier.fillMaxSize().padding(horizontal = 12.dp)) {
-                SeccionViaje(); SeccionSensores(); SeccionManejo(); SeccionAltitud(); SeccionRalenti(); Graficas()
+                SeccionViaje(); SeccionRodadas(); SeccionSensores(); SeccionManejo(); SeccionAltitud(); SeccionRalenti(); Graficas()
                 SeccionBateriaTel()
-                SeccionGasolina(); Mantenimientos(); SeccionControl(); SeccionTarjeta(); Consola()
+                SeccionGasolina(); Mantenimientos(); SeccionArrancones(); SeccionVelocimetro(); SeccionLogros()
+                SeccionControl(); SeccionTarjeta(); Consola()
             }
         }
     }

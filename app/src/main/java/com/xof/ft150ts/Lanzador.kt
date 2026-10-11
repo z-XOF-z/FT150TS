@@ -43,6 +43,8 @@ object Lanzador {
     val enPantalla = MutableStateFlow(true)
     /** Mostrar la animación de arranque la próxima vez que se vea la app (abriste el switch con la pantalla apagada). */
     val inicioPendiente = MutableStateFlow(false)
+    /** Cuándo se desbloqueó el modo XOF (para el confeti); 0 = nada. */
+    val confeti = MutableStateFlow(0L)
     /** Íconos pixelados al estilo del tablero. */
     val iconosPixel = MutableStateFlow(true)
     /** Estilo de los íconos: 0 normales, 1 pixel a color, 2 pixel LCD (de un solo color, el del acento). */

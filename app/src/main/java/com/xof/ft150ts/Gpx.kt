@@ -8,6 +8,7 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 import java.util.TimeZone
+import org.osmdroid.util.GeoPoint
 
 /**
  * Exporta el recorrido dibujado en el mapa como archivo GPX
@@ -15,13 +16,14 @@ import java.util.TimeZone
  */
 object Gpx {
     /** Devuelve false si todavía no hay recorrido. */
-    fun compartir(ctx: Context): Boolean {
-        val puntos = UbicacionManager.recorrido.value
-        if (puntos.size < 2) return false
+    fun compartir(ctx: Context): Boolean =
+        compartirLista(ctx, "FT150TS_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(Date()), UbicacionManager.recorrido.value)
 
+    /** Cualquier lista de puntos (p. ej. una rodada guardada) como GPX. */
+    fun compartirLista(ctx: Context, nombre: String, puntos: List<GeoPoint>): Boolean {
+        if (puntos.size < 2) return false
         val ahora = Date()
         val iso = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.US).apply { timeZone = TimeZone.getTimeZone("UTC") }
-        val nombre = "FT150TS_" + SimpleDateFormat("yyyyMMdd_HHmm", Locale.US).format(ahora)
 
         val sb = StringBuilder(puntos.size * 64 + 512)
         sb.append("""<?xml version="1.0" encoding="UTF-8"?>""").append('\n')

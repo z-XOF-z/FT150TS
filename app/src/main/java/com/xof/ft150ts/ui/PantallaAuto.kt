@@ -525,7 +525,7 @@ private fun iconoMoto(ctx: Context): Drawable {
     return BitmapDrawable(ctx.resources, bmp)
 }
 
-private fun crearMapa(ctx: Context): MapView {
+internal fun crearMapa(ctx: Context): MapView {
     val conf = Configuration.getInstance()
     conf.userAgentValue = ctx.packageName
     conf.osmdroidBasePath = File(ctx.cacheDir, "osmdroid")

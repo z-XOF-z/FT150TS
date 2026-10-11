@@ -116,6 +116,7 @@ fun PantallaAjustes(onAccesoNotif: () -> Unit, onVerInicio: () -> Unit) {
             SeccionCalor()
             SeccionMapa()
             SeccionAvisos()
+            SeccionLluviaRuta()
             SeccionVoz()
             SeccionLauncher()
             SeccionModoMoto()
@@ -124,6 +125,7 @@ fun PantallaAjustes(onAccesoNotif: () -> Unit, onVerInicio: () -> Unit) {
             SeccionRoot()
             SeccionConexion(onAccesoNotif)
             SeccionRuta()
+            SeccionRespaldo()
             SeccionAcercaDe(onVerInicio)
             Spacer(Modifier.heightIn(min = 24.dp))
         }
@@ -187,6 +189,10 @@ private fun SeccionApariencia() {
             }
             MuestraArcoiris(Apariencia.acento == Apariencia.ACENTO_LIBRE) {
                 Apariencia.ponerAcentoLibre(Apariencia.tonoLibre, Apariencia.saturacionLibre)
+            }
+            // Secreto del logo: acento Oro XOF
+            if (Apariencia.secretoXof) {
+                Muestra(Color(Apariencia.ORO_XOF), Apariencia.acento == Apariencia.ACENTO_ORO) { Apariencia.ponerAcento(Apariencia.ACENTO_ORO) }
             }
         }
         if (Apariencia.acento == Apariencia.ACENTO_LIBRE) {

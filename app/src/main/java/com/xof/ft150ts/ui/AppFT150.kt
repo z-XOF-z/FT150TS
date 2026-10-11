@@ -7,6 +7,7 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -54,6 +55,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.xof.ft150ts.Apariencia
+import com.xof.ft150ts.Logros
 import com.xof.ft150ts.Conexion
 import com.xof.ft150ts.Lanzador
 import com.xof.ft150ts.Moto
@@ -248,6 +251,13 @@ private fun Principal(
         }
     }
 
+    // Aviso de logro (baja desde arriba) y confeti del modo XOF
+    val confeti by Lanzador.confeti.collectAsStateWithLifecycle()
+    Box(Modifier.fillMaxSize()) {
+        BannerLogro(Modifier.align(Alignment.TopCenter).padding(top = 64.dp))
+        ConfetiPixel(confeti)
+    }
+
     // Llamada en el iPhone: aparece encima de cualquier pantalla
     var ocultarLlamada by remember { mutableStateOf("") }
     val llave = llamada.de + llamada.activa
@@ -285,7 +295,22 @@ private fun DialogoLlamada(de: String, acciones: Boolean, onCerrar: () -> Unit) 
 
 @Composable
 private fun LogoChico() {
-    Column {
+    // Secreto: 7 toques seguidos al logo → MODO XOF (acento Oro XOF, logro secreto y confeti)
+    var toques by remember { mutableStateOf(0) }
+    var ultimo by remember { mutableStateOf(0L) }
+    Column(
+        Modifier.clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) {
+            val ahora = System.currentTimeMillis()
+            toques = if (ahora - ultimo < 700) toques + 1 else 1
+            ultimo = ahora
+            if (toques >= 7) {
+                toques = 0
+                Apariencia.desbloquearXof()
+                Logros.desbloquear("xof")
+                Lanzador.confeti.value = ahora
+            }
+        }
+    ) {
         Row(verticalAlignment = Alignment.Bottom) {
             Text("FT150", color = Paleta.texto, fontSize = 18.sp, fontFamily = Fuentes.logo,
                 modifier = Modifier.alignByBaseline())

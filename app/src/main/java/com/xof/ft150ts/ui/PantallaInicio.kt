@@ -165,7 +165,7 @@ fun PantallaInicio(onTerminar: () -> Unit) {
 
         // versión abajo
         Text(
-            "v2.8.1", color = Paleta.textoSec.copy(alpha = fase(ms, 1500f, 500f)), fontSize = 8.sp,
+            "v2.9", color = Paleta.textoSec.copy(alpha = fase(ms, 1500f, 500f)), fontSize = 8.sp,
             fontFamily = Fuentes.pixel,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
         )

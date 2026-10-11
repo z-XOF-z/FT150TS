@@ -41,6 +41,9 @@ object Apariencia {
     )
     /** Índice del acento "Personalizado" (va después de la lista). */
     val ACENTO_LIBRE: Int get() = ACENTOS.size
+    /** Acento secreto "Oro XOF" (se desbloquea tocando 7 veces el logo). */
+    val ACENTO_ORO: Int get() = ACENTOS.size + 1
+    const val ORO_XOF = 0xFFFFC83DL
 
     val COLORES_RPM = listOf(
         ColoresRpm("Verde · Ámbar · Azul", 0xFF39FF14, 0xFFFFB300, 0xFF2979FF),
@@ -84,6 +87,9 @@ object Apariencia {
     /** Cuánto se suben los 4 accesos directos del tablero (milímetros reales), para librar los ganchos del soporte. */
     var subirAccesosMm by mutableIntStateOf(5)
         private set
+    /** Modo XOF desbloqueado (secreto del logo). */
+    var secretoXof by mutableStateOf(false)
+        private set
     /** Animación al entrar al tablero (barrido a 45° y las RPM suben al tope y regresan). */
     var animEntrada by mutableStateOf(true)
         private set
@@ -103,8 +109,16 @@ object Apariencia {
         private set
 
     /** Color de acento actual (de la lista o el personalizado). */
-    fun colorAcento(): Long = if (acento >= ACENTOS.size) hsv(tonoLibre, saturacionLibre, 1f) else ACENTOS[acento].argb
-    fun nombreAcento(): String = if (acento >= ACENTOS.size) "Personalizado" else ACENTOS[acento].nombre
+    fun colorAcento(): Long = when {
+        acento == ACENTO_ORO -> ORO_XOF
+        acento >= ACENTOS.size -> hsv(tonoLibre, saturacionLibre, 1f)
+        else -> ACENTOS[acento].argb
+    }
+    fun nombreAcento(): String = when {
+        acento == ACENTO_ORO -> "Oro XOF"
+        acento >= ACENTOS.size -> "Personalizado"
+        else -> ACENTOS[acento].nombre
+    }
 
     /** HSV → ARGB (sin depender de android.graphics). */
     fun hsv(h: Float, s: Float, v: Float): Long {
@@ -126,7 +140,8 @@ object Apariencia {
         val p = ctx.applicationContext.getSharedPreferences("apariencia", Context.MODE_PRIVATE)
         prefs = p
         tema = TemaApp.entries.firstOrNull { it.name == p.getString("tema", "CARBONO") } ?: TemaApp.CARBONO
-        acento = p.getInt("acento", 0).coerceIn(0, ACENTOS.size)
+        secretoXof = p.getBoolean("secretoXof", false)
+        acento = p.getInt("acento", 0).coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size)
         estiloTablero = if (p.getString("tablero", "LCD") == "CLASICO") EstiloTablero.CLASICO else EstiloTablero.LCD
         coloresRpm = p.getInt("coloresRpm", 0).coerceIn(0, COLORES_RPM.size - 1)
         siempreHorizontal = p.getBoolean("horizontal", false)
@@ -167,6 +182,7 @@ object Apariencia {
             ?.putInt("subirAccesosMm", subirAccesosMm)
             ?.putBoolean("neon", neon)
             ?.putBoolean("animEntrada", animEntrada)
+            ?.putBoolean("secretoXof", secretoXof)
             ?.putInt("fondo", fondo)
             ?.putInt("barraRpm", barraRpm)
             ?.putFloat("tonoLibre", tonoLibre)
@@ -175,7 +191,9 @@ object Apariencia {
     }
 
     fun ponerTema(t: TemaApp) { tema = t; guardar() }
-    fun ponerAcento(i: Int) { acento = i.coerceIn(0, ACENTOS.size); guardar() }
+    fun ponerAcento(i: Int) { acento = i.coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size); guardar() }
+    /** ¡Secreto! Acento Oro XOF y logro. */
+    fun desbloquearXof() { secretoXof = true; acento = ACENTO_ORO; guardar() }
     fun ponerAcentoLibre(tono: Float, sat: Float) { tonoLibre = tono; saturacionLibre = sat.coerceIn(0f, 1f); acento = ACENTOS.size; guardar() }
     fun ponerNeon(on: Boolean) { neon = on; guardar() }
     fun ponerAnimEntrada(on: Boolean) { animEntrada = on; guardar() }

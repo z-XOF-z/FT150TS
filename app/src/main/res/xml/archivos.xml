@@ -2,4 +2,6 @@
 <!-- Carpeta que se puede compartir (rutas GPX exportadas) -->
 <paths>
     <cache-path name="rutas" path="rutas/" />
+    <!-- Respaldo de los datos (para compartirlo) -->
+    <cache-path name="respaldos" path="respaldos/" />
 </paths>
