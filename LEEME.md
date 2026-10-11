@@ -21,6 +21,15 @@ en los ajustes de Bluetooth: la app la busca y se conecta sola.
 
 Gira el teléfono a horizontal y las pantallas se acomodan solas.
 
+## Novedades v2.9.1 — el GPS dice la verdad bajo techo
+- Antes decía "buscando satélites (26 en uso)" adentro de la casa y parecía error. "En uso" engaña: los chips
+  Qualcomm/Xiaomi marcan 20-30 satélites "en uso" aunque la señal no alcance para dar posición.
+- Ahora cuenta los satélites con **buena señal** (25 dB-Hz o más; se necesitan al menos 4) y lo dice claro:
+  "señal débil (bajo techo) · 2 sat buenos". El detalle del GPS muestra *Con buena señal*, *Marcados en uso* y
+  la *Señal más fuerte* en dB-Hz (afuera llega a 35-45; bajo techo 10-25).
+- Si el chip ya calculó la posición pero Android no se la pasa a la app (ahorro de batería de MIUI/HyperOS), la app
+  lo detecta, vuelve a pedirla sola y te dice qué ajuste revisar.
+
 ## Novedades v2.9 — rodadas, arrancones, lluvia en tu ruta, respaldo y sorpresas
 - **Rodadas** (página Moto): cada rodada se graba sola (con el cable de la moto, el motor o la tarjeta; sin ellos, solo
   con la app en pantalla) y se cierra a los 5 min parado. Distancia, tiempo, en movimiento, velocidad máxima y promedio,

@@ -34,11 +34,22 @@ data class EstadoGps(
     val edadS: Int = -1,             // hace cuántos segundos llegó la última posición del GPS (-1 = ninguna todavía)
     val aprox: Boolean = false,      // el mapa está usando la ubicación aproximada (wifi/antenas) mientras llega el GPS
     val precisionAprox: Float = -1f, // ± metros de la aproximada
+    val fuertes: Int = 0,            // satélites con señal buena (≥ 25 dB-Hz): sin al menos 4 no sale posición
+    val mejorSenal: Float = 0f,      // la señal más fuerte que llega (dB-Hz). Afuera: 35-45. Bajo techo: 10-25
+    val atorado: Boolean = false,    // el chip dice que ya tiene posición pero Android no se la pasa a la app
 ) {
     val conSenal: Boolean get() = edadS in 0..3
     /** Todavía no llega la primera posición del GPS desde que se prendió. */
     val buscando: Boolean get() = edadS < 0
+    /**
+     * Ve satélites pero muy débiles (bajo techo, en la cochera, entre edificios). Ojo: "en uso" engaña,
+     * algunos chips (Qualcomm, Xiaomi) marcan 20-30 satélites "en uso" aunque no les alcance para dar posición.
+     */
+    val senalDebil: Boolean get() = !conSenal && fuertes < 4
 }
+
+/** Desde cuántos dB-Hz un satélite cuenta como "buena señal". */
+private const val SENAL_BUENA = 25f
 
 /** GPS del teléfono: mueve el mapa, da la velocidad y, si la moto no tiene GPS, se lo presta. */
 @SuppressLint("MissingPermission")
@@ -62,6 +73,8 @@ object UbicacionManager {
     /** Cuándo llegó (reloj interno del teléfono) la última posición del GPS; 0 = ninguna desde que se prendió. */
     private var recibidoGps = 0L
     private var nanosGps = 0L
+    /** Cuándo dijo el chip que ya tenía posición (onFirstFix); 0 = todavía no. Sirve para saber si "se atora". */
+    private var primerFixChip = 0L
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val principal = Handler(Looper.getMainLooper())
 
@@ -98,13 +111,22 @@ object UbicacionManager {
         override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
     }
 
-    /** Satélites: cuántos ve, cuántos usa y si usa doble frecuencia. */
+    /** Satélites: cuántos ve, cuántos usa, cuántos llegan con buena señal y si usa doble frecuencia. */
     private val satelites = object : GnssStatus.Callback() {
+        override fun onStarted() { primerFixChip = 0L }
+        override fun onStopped() { primerFixChip = 0L }
+        override fun onFirstFix(ttffMillis: Int) { primerFixChip = SystemClock.elapsedRealtime() }
+
         override fun onSatelliteStatusChanged(status: GnssStatus) {
             var usados = 0
+            var fuertes = 0
+            var mejor = 0f
             var l5 = false
             val tipos = HashSet<String>()
             for (i in 0 until status.satelliteCount) {
+                val cn0 = status.getCn0DbHz(i)
+                if (cn0 >= SENAL_BUENA) fuertes++
+                if (cn0 > mejor) mejor = cn0
                 if (!status.usedInFix(i)) continue
                 usados++
                 tipos += when (status.getConstellationType(i)) {
@@ -119,7 +141,7 @@ object UbicacionManager {
             }
             estado.value = estado.value.copy(
                 usados = usados, visibles = status.satelliteCount, dobleFrecuencia = l5,
-                constelaciones = tipos.sorted().joinToString(" · "),
+                constelaciones = tipos.sorted().joinToString(" · "), fuertes = fuertes, mejorSenal = mejor,
             )
         }
     }
@@ -147,6 +169,7 @@ object UbicacionManager {
             m.requestLocationUpdates(LocationManager.GPS_PROVIDER, 1000L, 0f, listener, Looper.getMainLooper())
             activo = true
             recibidoGps = 0L
+            primerFixChip = 0L
             refrescos = 0
             // Para que el mapa no arranque vacío (vieja: no cuenta como señal)
             m.getLastKnownLocation(LocationManager.GPS_PROVIDER)?.let { if (ubicacion.value == null) ubicacion.value = it }
@@ -179,9 +202,11 @@ object UbicacionManager {
         try { lm?.unregisterGnssStatusCallback(satelites) } catch (_: Exception) { }
         activo = false
         recibidoGps = 0L
+        primerFixChip = 0L
         velocidad.value = -1f
         // Que no se queden números viejos de satélites
-        estado.value = estado.value.copy(usados = 0, visibles = 0, dobleFrecuencia = false, constelaciones = "", edadS = -1)
+        estado.value = estado.value.copy(usados = 0, visibles = 0, dobleFrecuencia = false, constelaciones = "", edadS = -1,
+            fuertes = 0, mejorSenal = 0f, atorado = false)
     }
 
     /**
@@ -199,15 +224,18 @@ object UbicacionManager {
                 val e = edadMs()
                 val s = if (recibidoGps == 0L) -1 else (e / 1000).toInt().coerceAtMost(99_999)
                 val usarAprox = aproxVigente()
-                if (s != estado.value.edadS || usarAprox != estado.value.aprox) {
-                    estado.value = estado.value.copy(edadS = s, aprox = usarAprox)
+                val ahora = SystemClock.elapsedRealtime()
+                // El chip ya calculó posición hace más de 8 s y a la app no le ha llegado ninguna
+                val atorado = activo && recibidoGps == 0L && primerFixChip != 0L && ahora - primerFixChip > 8_000
+                if (s != estado.value.edadS || usarAprox != estado.value.aprox || atorado != estado.value.atorado) {
+                    estado.value = estado.value.copy(edadS = s, aprox = usarAprox, atorado = atorado)
                 }
                 if (e > 3_000) velocidad.value = -1f
                 val enUso = BleManager.primerPlano || TelefonoMoto.trabajando.value
-                val ahora = SystemClock.elapsedRealtime()
-                if (activo && enUso && recibidoGps != 0L && e > 12_000 && estado.value.usados >= 4 &&
-                    ahora - ultimoRefresco > 30_000 && refrescos < 5
-                ) {
+                // Renueva la petición (sin soltar el GPS) si ya llegaban posiciones y dejaron de llegar con buena
+                // señal, o si el chip ya tiene posición y nunca llegó ninguna
+                val renovar = (recibidoGps != 0L && e > 12_000 && estado.value.fuertes >= 4) || atorado
+                if (activo && enUso && renovar && ahora - ultimoRefresco > 30_000 && refrescos < 5) {
                     ultimoRefresco = ahora
                     refrescos++
                     try {

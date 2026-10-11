@@ -189,7 +189,8 @@ private fun SeccionSensores() {
             MiniDato("gps moto", if (e.gpsFix) "${e.sats} sat" else "sin señal", if (e.gpsFix) Paleta.verde else Paleta.textoSec)
             MiniDato("gps cel", when {
                 gps.conSenal -> "${gps.usados} sat ±${gps.precision.roundToInt()}m"
-                gps.buscando -> "buscando (${gps.usados} sat)"
+                gps.buscando && gps.senalDebil -> "señal débil (bajo techo)"
+                gps.buscando -> "buscando (${gps.fuertes} buenos)"
                 ubic != null -> "sin señal"
                 else -> "--"
             }, if (gps.conSenal) Paleta.verde else Paleta.textoSec)

@@ -83,7 +83,11 @@ fun TiraEstado(modifier: Modifier = Modifier, compacta: Boolean = false) {
                     Offset(i * (w + hueco), size.height - alto), Size(w, alto))
             }
         }
-        if (!compacta) EtiquetaPixel(if (gps.conSenal || gps.usados > 0) "${gps.usados}" else "--", colorGps, 7.sp)
+        if (!compacta) EtiquetaPixel(when {
+            gps.conSenal -> "${gps.usados}"
+            gps.visibles > 0 -> "${gps.fuertes}"   // sin posición: los que llegan con buena señal, no los "en uso"
+            else -> "--"
+        }, colorGps, 7.sp)
         Diagonal()
         // Batería del cel: pila pixel + % (+ rayo si carga)
         val pct = bat.pct

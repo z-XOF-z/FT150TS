@@ -374,8 +374,13 @@ private fun MapaMoto(modifier: Modifier) {
 
         val avisoGps = when {
             punto == null -> "buscando gps..."
-            gps.buscando -> "buscando satelites (${gps.usados} en uso)" + if (gps.aprox) " - mapa aprox." else ""
-            gps.edadS > 5 -> "sin señal gps (${gps.edadS} s)" + if (gps.aprox) " - mapa aprox." else ""
+            gps.buscando -> when {
+                gps.atorado -> "el gps tiene posicion pero no llega"
+                gps.senalDebil -> "señal debil (bajo techo) · ${gps.fuertes} sat buenos"
+                else -> "buscando satelites (${gps.fuertes} con buena señal)"
+            } + if (gps.aprox) " - mapa aprox." else ""
+            gps.edadS > 5 -> "sin señal gps (${gps.edadS} s)" + (if (gps.senalDebil) " · señal debil" else "") +
+                if (gps.aprox) " - mapa aprox." else ""
             else -> null
         }
         if (avisoGps != null) {
@@ -1461,7 +1466,8 @@ private fun ChipGps() {
         Text(
             when {
                 g.conSenal -> "${g.usados} sat" + if (g.precision >= 0) " ±${g.precision.roundToInt()} m" else ""
-                g.buscando -> "buscando · ${g.usados} sat"
+                g.buscando && g.senalDebil -> "señal débil · ${g.fuertes}/${g.visibles}"
+                g.buscando -> "buscando · ${g.fuertes} buenos"
                 else -> "sin señal"
             } + if (!g.conSenal && g.aprox) " · aprox" else "",
             color = Paleta.texto, fontSize = 11.sp, fontWeight = FontWeight.SemiBold,
@@ -1486,14 +1492,22 @@ private fun DialogoGps(onCerrar: () -> Unit) {
         onDismissRequest = onCerrar,
         title = { EtiquetaPixel("gps del telefono", Paleta.lima, 9.sp) },
         text = {
-            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                Dato("Señal", if (g.conSenal) "Sí" else if (g.buscando) "Buscando satélites…" else "Perdida hace ${g.edadS} s",
-                    if (g.conSenal) Paleta.verde else Paleta.ambar)
+            Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Dato("Señal", when {
+                    g.conSenal -> "Sí"
+                    g.atorado -> "Sin entregar"
+                    g.buscando && g.senalDebil -> "Muy débil (bajo techo)"
+                    g.buscando -> "Buscando satélites…"
+                    else -> "Perdida hace ${g.edadS} s"
+                }, if (g.conSenal) Paleta.verde else if (g.atorado) Paleta.rojo else Paleta.ambar)
                 if (!g.conSenal) {
                     Dato("Mapa", if (g.aprox) "Aproximado (wifi/antenas)" + if (g.precisionAprox >= 0) " ±${g.precisionAprox.roundToInt()} m" else ""
                         else "Última posición del GPS", Paleta.ambar)
                 }
-                Dato("Satélites", "${g.usados} usados de ${g.visibles}")
+                Dato("Con buena señal", "${g.fuertes} de ${g.visibles}", if (g.fuertes >= 4) Paleta.texto else Paleta.ambar)
+                Dato("Marcados en uso", "${g.usados}")
+                Dato("Señal más fuerte", if (g.mejorSenal > 0f) "${g.mejorSenal.roundToInt()} dB-Hz" else "--",
+                    if (g.mejorSenal >= 30f) Paleta.texto else Paleta.ambar)
                 Dato("Precisión", if (g.precision >= 0) "±${g.precision.roundToInt()} m" else "--")
                 Dato("Doble frecuencia (L5)", if (g.dobleFrecuencia) "Sí (más preciso)" else "No por ahora")
                 if (g.constelaciones.isNotBlank()) Dato("Sistemas", g.constelaciones)
@@ -1513,9 +1527,18 @@ private fun DialogoGps(onCerrar: () -> Unit) {
                 }
                 BotonDeportivo("Compartir mi ubicación", { Acciones.compartirUbicacion(ctx) }, Modifier.fillMaxWidth(),
                     primario = false, tamanoTexto = 11.sp)
-                Text("Adentro de la casa o bajo techo la primera señal puede tardar de 1 a 2 minutos (cerca de una ventana " +
-                    "o afuera, segundos); mientras, el mapa usa la ubicación aproximada. Sin señal, la velocidad marca \"--\" " +
-                    "en vez de quedarse congelada.", color = Paleta.textoSec, fontSize = 11.sp)
+                Text(when {
+                    g.atorado -> "El chip del GPS ya calculó tu posición pero Android no se la está pasando a la app (la app ya " +
+                        "volvió a pedirla). Revisa en los ajustes del teléfono: Apps > FT150TS > Ahorro de batería = Sin " +
+                        "restricciones, y Ubicación > Ubicación precisa encendida."
+                    !g.conSenal && g.senalDebil -> "Es normal bajo techo: el techo y las paredes tapan los satélites. \"Marcados " +
+                        "en uso\" engaña: el chip los está siguiendo, pero con menos de 4 con buena señal (25 dB-Hz o más) no " +
+                        "le alcanza para dar posición. Afuera o junto a una ventana, en 1 o 2 minutos cambia a \"N sat ±X m\". " +
+                        "Mientras, el mapa usa la ubicación aproximada y la velocidad marca \"--\"."
+                    else -> "Adentro de la casa o bajo techo la primera señal puede tardar de 1 a 2 minutos (cerca de una ventana " +
+                        "o afuera, segundos); mientras, el mapa usa la ubicación aproximada. Sin señal, la velocidad marca \"--\" " +
+                        "en vez de quedarse congelada."
+                }, color = Paleta.textoSec, fontSize = 11.sp)
             }
         },
         confirmButton = { TextButton(onClick = onCerrar) { Text("Cerrar") } },
