@@ -109,7 +109,7 @@
   #include <BLESecurity.h>
 #endif
 
-#define FW_VERSION "v1.3"
+#define FW_VERSION "v1.4"
 
 // ================================================================
 // 1) TAMAÑOS Y TIPOS
@@ -386,7 +386,9 @@ const uint32_t AVISO_MS            = 2000;
 
 // ---------- Red ----------
 const char* AP_SSID     = "FT150TS-Dash";
-const char* AP_PASS     = "12345678";          // <-- X mínimo 8 caracteres
+const char* AP_PASS     = "12345678";          // <-- X déjala así y cada tarjeta genera su propia clave al azar
+                                               //     (verla: comando "wifi clave" por USB o Bluetooth vinculado),
+                                               //     o pon aquí tu clave (8 a 15 caracteres)
 const char* STA_SSID    = "X";                 // <-- X WiFi de tu casa (para respaldo)
 const char* STA_PASS    = "X";                 // <-- X
 const char* BACKUP_URL  = "X";                 // <-- X ej. http://tuservidor/subir
@@ -2110,7 +2112,30 @@ BLECharacteristic* g_chResp = nullptr;
 // Cola de comandos recibidos por Bluetooth (se ejecutan en loop)
 const uint8_t COLA_CMD = 6;
 char g_cmdCola[COLA_CMD][100];
+bool g_cmdCifrado[COLA_CMD];     // el comando llegó por un enlace cifrado (teléfono vinculado)
 volatile uint8_t g_cmdIni = 0, g_cmdFin = 0;
+
+// ---------- Seguridad Bluetooth (v1.4) ----------
+// Cualquiera con una app BLE genérica podía conectarse y mandar "corte on confirmar". Ahora:
+//  1) Los comandos delicados solo se aceptan por un enlace cifrado (teléfono vinculado).
+//  2) Vincular un teléfono NUEVO solo se puede en una ventana: los primeros 2 min después de encender
+//     la tarjeta, o 2 min después del comando "vincular" (mandado desde un teléfono ya vinculado o por USB).
+//  3) A un teléfono ya vinculado se le cifra el enlace al conectarse.
+// Por USB (Serial) todo sigue permitido: requiere tener la tarjeta en la mano.
+uint32_t g_ventanaVincularHasta = 120000;
+bool ventanaVincular() { return (int32_t)(g_ventanaVincularHasta - millis()) > 0; }
+
+bool estaVinculado(const uint8_t* bda) {
+  int n = esp_ble_get_bond_device_num();
+  if (n <= 0) return false;
+  esp_ble_bond_dev_t* lista = (esp_ble_bond_dev_t*)malloc(sizeof(esp_ble_bond_dev_t) * n);
+  if (!lista) return false;
+  esp_ble_get_bond_device_list(&n, lista);
+  bool si = false;
+  for (int i = 0; i < n; i++) if (memcmp(lista[i].bd_addr, bda, 6) == 0) si = true;
+  free(lista);
+  return si;
+}
 uint32_t g_ultTelRapida = 0, g_ultTelLenta = 0;
 uint8_t g_turnoLenta = 0;
 
@@ -2141,6 +2166,8 @@ class BleServidorCb : public BLEServerCallbacks {
       g_conex[i].desde = millis();
       break;
     }
+    // Teléfono ya vinculado: se cifra el enlace de una vez (así sus comandos delicados valen)
+    if (estaVinculado(p->connect.remote_bda)) esp_ble_set_encryption(p->connect.remote_bda, ESP_BLE_SEC_ENCRYPT);
     recalcularConexiones();
     BLEDevice::startAdvertising();   // sigue visible para el otro teléfono
   }
@@ -2175,6 +2202,10 @@ class BleCmdCb : public BLECharacteristicCallbacks {
     String v = String(c->getValue().c_str());
     strncpy(g_cmdCola[g_cmdFin], v.c_str(), 99);
     g_cmdCola[g_cmdFin][99] = '\0';
+    bool cif = false;
+    for (uint8_t i = 0; i < MAX_CONEX; i++)
+      if (g_conex[i].usada && g_conex[i].id == p->write.conn_id) cif = g_conex[i].cifrada;
+    g_cmdCifrado[g_cmdFin] = cif;
     g_cmdFin = sig;
   }
 };
@@ -2221,8 +2252,10 @@ bool     g_dsAcciones = false;
 class SeguridadCb : public BLESecurityCallbacks {
   uint32_t onPassKeyRequest() override { return 123456; }
   void onPassKeyNotify(uint32_t) override {}
-  bool onConfirmPIN(uint32_t) override { return true; }
-  bool onSecurityRequest() override { return true; }
+  // Vincular un teléfono nuevo solo dentro de la ventana (ver "Seguridad Bluetooth"); los ya vinculados
+  // se reconectan cifrados sin pasar por aquí
+  bool onConfirmPIN(uint32_t) override { return ventanaVincular(); }
+  bool onSecurityRequest() override { return ventanaVincular(); }
   void onAuthenticationComplete(esp_ble_auth_cmpl_t r) override {
     if (r.success) g_iosAuthOk = true; else g_iosAuthFallo = true;
     // Un iPhone ya vinculado cifra el enlace él solo al reconectarse
@@ -2634,6 +2667,8 @@ void mostrarAyuda(Print& out) {
   out.println(F(" ios play|pausa|toggle|sig|ant|vol+|vol-   musica del iPhone"));
   out.println(F(" ios contestar|colgar    llamada entrante del iPhone"));
   out.println(F(" ios olvidar             borra el vinculo (volver a vincular)"));
+  out.println(F(" vincular                abre 2 min para vincular un telefono nuevo"));
+  out.println(F(" wifi clave              muestra la clave del WiFi de la tarjeta"));
   out.println(F(" sim caida|frenada       solo en demo"));
   out.println(F(" backup                  respaldo ahora (WiFi casa)"));
   out.println(F(" dormir                  prueba el modo ahorro"));
@@ -2684,6 +2719,40 @@ void cfgJson(Print& out) {
   for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%.1f", i ? "," : "", P.ratioMarcha[i]);
   out.println(F("]}"));
 }
+
+// Comandos que cambian algo delicado (motor, calibración, datos, red, llamadas). Solo se aceptan por
+// Bluetooth con enlace cifrado (teléfono vinculado) o por USB; nunca por la página WiFi.
+bool comandoDelicado(const String& low) {
+  String c0 = palabra(low, 0), c1 = palabra(low, 1);
+  if (c0 == "corte" || c0 == "cal" || c0 == "odo" || c0 == "real" || c0 == "demo" || c0 == "reiniciar" ||
+      c0 == "wifi" || c0 == "vel" || c0 == "vincular") return true;
+  if (c0 == "mant" && (c1 == "reset" || c1 == "set")) return true;
+  if (c0 == "ios" && (c1 == "olvidar" || c1 == "contestar" || c1 == "colgar")) return true;
+  return false;
+}
+
+#if USAR_WIFI
+// Clave del WiFi de la tarjeta: única por tarjeta (se genera al azar la primera vez y se guarda).
+// Antes era "12345678" para todas, y está publicada en el repositorio.
+char g_apClave[16] = "";
+void apClavePreparar() {
+  if (strcmp(AP_PASS, "12345678") != 0 && strlen(AP_PASS) >= 8 && strlen(AP_PASS) < sizeof(g_apClave)) {
+    strncpy(g_apClave, AP_PASS, sizeof(g_apClave) - 1);   // pusiste tu propia clave en AP_PASS
+    return;
+  }
+  Preferences s;
+  s.begin("seguridad", false);
+  String c = s.getString("apclave", "");
+  if (c.length() < 8) {
+    static const char ABC[] = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";   // sin 0/O ni 1/I para no confundirse
+    c = "";
+    for (int i = 0; i < 10; i++) c += ABC[esp_random() % 32];
+    s.putString("apclave", c);
+  }
+  s.end();
+  strncpy(g_apClave, c.c_str(), sizeof(g_apClave) - 1);
+}
+#endif
 
 void ejecutarComando(String linea, Print& out) {
   linea.trim();
@@ -2790,6 +2859,9 @@ void ejecutarComando(String linea, Print& out) {
     nvsGuardar();
     out.println(P.autoBrillo ? F("Brillo automatico.") : F("Brillo fijo."));
   }
+#if USAR_WIFI
+  else if (c0 == "wifi" && c1 == "clave") out.printf("Red %s  clave %s\n", AP_SSID, g_apClave);
+#endif
   else if (c0 == "wifi") {
     if (c1 == "on") P.wifiOn = true;
     else if (c1 == "off") {
@@ -2802,6 +2874,9 @@ void ejecutarComando(String linea, Print& out) {
     out.println(P.wifiOn ? F("WiFi encendido (al reiniciar).") : F("WiFi apagado."));
   }
   else if (c0 == "reiniciar") { nvsGuardar(); g_reiniciarEn = millis() + 1200; out.println(F("Reiniciando...")); }
+#if USAR_BLE
+  else if (c0 == "vincular") { g_ventanaVincularHasta = millis() + 120000; out.println(F("Vinculacion abierta 2 min.")); }
+#endif
   else if (c0 == "sim" && g_modoDemo) {
     if (c1 == "caida") g_simCaidaHasta = millis() + 6000;
     else if (c1 == "frenada") g_simFrenadaHasta = millis() + 1500;
@@ -2871,14 +2946,21 @@ void webBegin() {
   if (!P.wifiOn) return;
   bool sta = strcmp(STA_SSID, "X") != 0;
   WiFi.mode(sta ? WIFI_AP_STA : WIFI_AP);
-  WiFi.softAP(AP_SSID, AP_PASS);
+  apClavePreparar();                       // ya con la radio prendida: el azar es de verdad
+  WiFi.softAP(AP_SSID, g_apClave);
   if (sta) WiFi.begin(STA_SSID, STA_PASS);
 
   server.on("/", []() { server.send_P(200, "text/html", PAGINA); });
   server.on("/api", []() { server.send(200, "application/json", jsonDatos()); });
   server.on("/cmd", []() {
+    String c = server.arg("c");
+    String low = c;
+    low.trim();
+    low.toLowerCase();
+    // Por la red WiFi no pasan comandos delicados (corte, calibración, borrar…): solo Bluetooth vinculado o USB
+    if (comandoDelicado(low)) { server.send(403, "text/plain", "Ese comando solo por Bluetooth vinculado o USB."); return; }
     TextoPrint tp;
-    ejecutarComando(server.arg("c"), tp);
+    ejecutarComando(c, tp);
     server.send(200, "text/plain", tp.s);
   });
   server.on("/notif", []() {
@@ -2898,7 +2980,7 @@ void webBegin() {
   });
   server.begin();
   g_wifiIniciado = true;
-  Serial.printf("WiFi: conectate a '%s' y abre http://%s\n", AP_SSID, WiFi.softAPIP().toString().c_str());
+  Serial.printf("WiFi: conectate a '%s' (clave %s) y abre http://%s\n", AP_SSID, g_apClave, WiFi.softAPIP().toString().c_str());
 }
 #endif
 
@@ -3089,9 +3171,14 @@ void bleActualizar() {
   // 1) Comando recibido desde la app
   if (g_cmdIni != g_cmdFin) {
     String c = String(g_cmdCola[g_cmdIni]);
+    bool cifrado = g_cmdCifrado[g_cmdIni];
     g_cmdIni = (g_cmdIni + 1) % COLA_CMD;
     TextoPrint tp;
-    ejecutarComando(c, tp);
+    String low = c;
+    low.trim();
+    low.toLowerCase();
+    if (!cifrado && comandoDelicado(low)) tp.println(F("Bloqueado: vincula el telefono con la moto (enlace cifrado)."));
+    else ejecutarComando(c, tp);
     if (tp.s.length() && g_bleConectado) {
       for (size_t i = 0; i < tp.s.length(); i += 180) {
         String parte = tp.s.substring(i, min(i + 180, (size_t)tp.s.length()));

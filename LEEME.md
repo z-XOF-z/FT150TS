@@ -21,6 +21,59 @@ en los ajustes de Bluetooth: la app la busca y se conecta sola.
 
 Gira el teléfono a horizontal y las pantallas se acomodan solas.
 
+## Novedades v3.0 — Vértice, seguridad y fluidez comprobable
+- **Tema nuevo: Vértice** (Ajustes > Apariencia). No es solo otro color: cambia la organización.
+  - En horizontal la navegación pasa a un **riel a la izquierda**, centrado: lejos de los ganchos del soporte (que en
+    horizontal agarran las orillas de arriba y abajo) y sin barra arriba, así **el LCD del tablero sale más grande**.
+  - **Estela:** arriba del riel, la velocidad, la marcha y una barra de RPM siguen a la vista en Auto, Moto, Apps y
+    Ajustes (en el tablero sale el logo). El dato vital nunca desaparece al cambiar de sección.
+  - **Línea de carrera:** una sola línea del acento corre por el riel, se engrosa en la sección activa (sigue al dedo
+    al deslizar) y sale a 45° sobre el contenido. Une navegación y contenido.
+  - **Losas en vez de cajas:** las tarjetas no llevan contorno; pesan como Carbono (grafito sólido) y solo marcan el
+    vértice a 45° y una luz de borde que se desvanece. Fondo de fibra de carbono y un chevrón gigante casi invisible.
+  - Tic háptico corto al cambiar de sección desde el riel. En vertical usa la barra integrada.
+- **Medidor de fluidez** (Ajustes > Pantalla): cuadros por segundo, % de tirones y el peor cuadro, medidos por
+  Android (FrameMetrics) en su propio hilo. Para comprobar en tu teléfono que todo va fluido.
+- **Atajos del ícono:** mantén presionado el ícono de FT150TS → Tablero, Mapa o Moto.
+- **Rodada que se cierra al apagar la moto** con **resumen por voz** ("12.4 kilómetros en 25 minutos, máxima de 78").
+- **Seguridad** (detalle en [SEGURIDAD.md](SEGURIDAD.md)):
+  - La app ya no se conecta a cualquier aparato Bluetooth con el servicio "Nordic UART": verifica que sea la tarjeta
+    FT150TS, se queda con la primera verificada (Ajustes > Conexión > Olvidar tarjeta para cambiarla) y pide vincularla.
+  - Restaurar un respaldo: se revisa completo antes de escribir, en segundo plano, con tope de tamaño, y ya no puede
+    traer los ajustes de root.
+  - Firmware v1.4: comandos delicados (corte de motor, calibraciones, borrar…) solo por Bluetooth vinculado o USB;
+    vincular un teléfono nuevo solo en los 2 min después de encender; el WiFi de la tarjeta ya no usa la clave
+    "12345678" (cada tarjeta genera la suya) y su página no acepta comandos delicados.
+
+## Novedades v3.0 — tres temas nuevos, reposo al estacionar y baches por cuadra
+- **Reposo al estacionar** (Ajustes > Modo moto). Con la moto parada y el teléfono cargando, a los 3 min (2, 3, 5 o
+  10) descansan los sensores de vibración (leían cientos de veces por segundo aunque la moto estuviera apagada), el GPS
+  (salvo que la tarjeta lo use) y los 120 Hz (baja a 60). La pantalla cambia a un **reloj negro AMOLED atenuado** con la
+  hora y la batería, que se mueve un poco cada 30 s para no marcar la pantalla; o, si prefieres, se deja apagar.
+  Despierta al instante al **dar marcha** (la carga se corta y regresa), al mover el teléfono (sensor de movimiento),
+  al tocar la pantalla o al conectarse la tarjeta; y entra la animación del tablero como al dar switch.
+  Es el paso antes del modo sueño (que sigue igual, a la hora).
+- **Baches por cuadra, no uno por uno.** Antes avisaba cada bache por separado (5 baches = 5 avisos). Ahora hay un
+  solo aviso que dice cuántos vienen ("Cuadra con baches, 4 adelante, uno fuerte"), máximo uno cada ~100 m y
+  máximo dos en 250 m. Busca hasta 150 m adelante y no los revisa estando en reposo o dormida.
+- **Tema nuevo: Ácido.** Cinta de peligro: el corte grande de arriba-izquierda con tres franjas paralelas a 45°, una
+  cinta de rayas abajo a la derecha de cada tarjeta, franjas de peligro en dos esquinas de la pantalla y brillo tóxico.
+  Va perfecto con Verde tóxico o el nuevo acento Ácido.
+- **Tema nuevo: Circuito.** Pistas de circuito impreso con dobleces a 45°, pads y vías al fondo; tarjetas con los cortes
+  arriba-derecha y abajo-izquierda, un pad con su pista y una fila de pines.
+- **4 acentos fluorescentes nuevos:** Ácido, Verde menta neón, Naranja fluor y Rosa fluor (tu "Personalizado" y el Oro
+  XOF se quedan como estaban).
+- **Tema nuevo: Holo** (Ajustes > Apariencia). Visor holográfico: las cuatro esquinas cortadas a 45° en tarjetas,
+  botones y barra de arriba; doble contorno (uno por dentro, tenue); la esquina de arriba-izquierda iluminada con el
+  acento; una regla de marcas en las tarjetas y abajo de la pantalla; y superficies teñidas con un poquito de tu color
+  de acento, como luz proyectada. Va con la barra integrada (como Filo, Pixel y Táctico) y combina con el neón.
+- **Se lee mejor de un vistazo:** los números pixel de la barra de estado (satélites, batería del cel) y el chip de
+  conexión subieron de 7 a 8 sp.
+- **Pestañas más fáciles de atinar** en Carbono y Vidrio: 48 dp de alto como mínimo (la medida de Android), aun con guantes.
+- **Respeta "Quitar animaciones"** del sistema: si las apagas en Android, la animación FT150 y la entrada al tablero
+  se saltan y ves el cuadro final directo. Con las animaciones normales todo sigue igual.
+- El ícono de Apps ya no se anuncia como "Ajustes" en el lector de pantalla.
+
 ## Novedades v2.9.2 — el GPS ya no se queda "perdido"
 - **Se reconecta solo.** Si hay buena señal y las posiciones dejan de llegar (Android puede "congelar" el GPS de una
   app al apagar la pantalla o mandarla a segundo plano), la app pide el GPS de nuevo **sin apagarlo** (primero la

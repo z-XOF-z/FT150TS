@@ -16,6 +16,13 @@ object Pantalla {
         d.supportedModes.maxOf { it.refreshRate }.roundToInt()
     } catch (_: Exception) { 60 }
 
+    /** Hz a los que está corriendo la pantalla ahorita (el presupuesto de cada cuadro sale de aquí). */
+    fun hzActuales(a: Activity): Int = try {
+        val d: Display = (if (Build.VERSION.SDK_INT >= 30) a.display else null)
+            ?: @Suppress("DEPRECATION") a.windowManager.defaultDisplay
+        d.refreshRate.roundToInt().coerceAtLeast(30)
+    } catch (_: Exception) { 60 }
+
     /** [alta] = usa el modo con más Hz (misma resolución); si no, deja que Android decida. */
     fun aplicar(a: Activity, alta: Boolean) {
         try {

@@ -98,6 +98,7 @@ fun SeccionRodadas() {
     val lista by Rodadas.lista.collectAsStateWithLifecycle()
     val enCurso by Rodadas.enCurso.collectAsStateWithLifecycle()
     val aviso by Rodadas.avisoDescanso.collectAsStateWithLifecycle()
+    val resumen by Rodadas.resumenVoz.collectAsStateWithLifecycle()
     var verTodas by remember { mutableStateOf(false) }
     var abierta by remember { mutableStateOf<Rodada?>(null) }
     Seccion("Rodadas") {
@@ -122,6 +123,11 @@ fun SeccionRodadas() {
         }
         FilaSwitch("Aviso de descanso", "Si llevas 1.5 h rodando sin parar, te sugiere una pausa (por voz)", aviso) {
             Rodadas.ponerAvisoDescanso(it)
+        }
+        FilaSwitch("Resumen al apagar la moto",
+            "Al apagar el switch con la moto parada, la rodada se cierra en ese momento y te dice por voz los km, " +
+                "el tiempo y la máxima (sin el cable de la moto se sigue cerrando a los 5 min parada)", resumen) {
+            Rodadas.ponerResumenVoz(it)
         }
     }
     abierta?.let { DialogoRodada(it) { abierta = null } }

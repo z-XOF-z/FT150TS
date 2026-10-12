@@ -16,9 +16,11 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
@@ -44,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -61,6 +64,7 @@ import com.xof.ft150ts.Conexion
 import com.xof.ft150ts.Lanzador
 import com.xof.ft150ts.Moto
 import com.xof.ft150ts.PAGINA_TABLERO
+import com.xof.ft150ts.Reposo
 import kotlinx.coroutines.launch
 
 // 0 = apps (launcher, a la izquierda del tablero), 1 tablero, 2 auto, 3 moto, 4 ajustes (engrane)
@@ -94,10 +98,15 @@ fun AppFT150(onAccesoNotif: () -> Unit, onActivarBt: () -> Unit, onPermisos: () 
             listo = true
         }
     }
+    // Reposo con el reloj: tapa todo y las páginas dejan de actualizarse (mapa, relojes y animaciones descansan)
+    val reposo by Reposo.enReposo.collectAsStateWithLifecycle()
+    val pantallaReposo by Reposo.pantalla.collectAsStateWithLifecycle()
+    val reloj = reposo && pantallaReposo == 0
     Box(Modifier.fillMaxSize()) {
         // Arranque en frío: primero la animación sola (para que vaya fluida); luego las páginas
         // (con la animación encima, las páginas no se actualizan: no gastan mientras no se ven)
-        if (listo || !inicio) Principal(onAccesoNotif, onActivarBt, onPermisos, tapado = inicio) { inicio = true }
+        if (listo || !inicio) Principal(onAccesoNotif, onActivarBt, onPermisos, tapado = inicio || reposo) { inicio = true }
+        if (reloj && !capa) PantallaReposo { Reposo.salir("Tocaste la pantalla") }
         if (capa) {
             Box(Modifier.fillMaxSize().graphicsLayer { alpha = alfa.value }) {
                 PantallaInicio { inicio = false }
@@ -153,18 +162,65 @@ private fun Principal(
     val datosMalos by Moto.datosMalos.collectAsStateWithLifecycle()
     val llamada by Moto.iphoneLlamada.collectAsStateWithLifecycle()
 
+    // Con la pantalla apagada (o en otra app) ninguna página cuenta como visible: mapa, brújula y relojes descansan.
+    // collectAsState (no ...WithLifecycle) a propósito: tiene que enterarse justo cuando se deja de ver.
+    val enPantalla by Lanzador.enPantalla.collectAsState()
+    val irA: (Int) -> Unit = { i -> scope.launch { pager.animateScrollToPage(i) } }
+    val alChip: () -> Unit = {
+        when (conexion) {
+            Conexion.BT_APAGADO -> onActivarBt()
+            Conexion.SIN_PERMISO -> onPermisos()
+            else -> {}
+        }
+    }
+    // Las cinco páginas (las mismas en todos los temas; lo que cambia es el marco alrededor)
+    val paginas: @Composable (Modifier) -> Unit = { mod ->
+        HorizontalPager(
+            state = pager,
+            modifier = mod,
+            beyondViewportPageCount = PAGINAS.size,   // todas armadas: el mapa no se recarga y no hay tirones
+        ) { pagina ->
+            // Las páginas ocultas siguen vivas pero apagan sus relojes y animaciones
+            CompositionLocalProvider(LocalPaginaVisible provides (pager.currentPage == pagina && enPantalla && !tapado)) {
+                // Todas las páginas se quedan armadas (cambiar de pestaña es instantáneo);
+                // las que no se ven dejan de actualizarse (ver enVivo()).
+                when (pagina) {
+                    0 -> PantallaApps()
+                    1 -> PantallaTablero()
+                    2 -> PantallaAuto(onAccesoNotif)
+                    3 -> PantallaMoto()
+                    else -> PantallaAjustes(onAccesoNotif, onVerInicio)
+                }
+            }
+        }
+    }
+    val avisoDatos: @Composable () -> Unit = {
+        if (datosMalos) {
+            Text(
+                "Llegan datos incompletos de la moto. Reinicia el Bluetooth del teléfono.",
+                color = Paleta.ambar, fontSize = 12.sp,
+                modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
+            )
+        }
+    }
+
     // Fondo AMOLED con cuadrícula pixel (y brillos en el tema Vidrio)
     Box(Modifier.fillMaxSize()) {
         FondoApp()
-        Column(Modifier.fillMaxSize().safeDrawingPadding()) {
-            val irA: (Int) -> Unit = { i -> scope.launch { pager.animateScrollToPage(i) } }
-            val alChip: () -> Unit = {
-                when (conexion) {
-                    Conexion.BT_APAGADO -> onActivarBt()
-                    Conexion.SIN_PERMISO -> onPermisos()
-                    else -> {}
+        BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
+            if (temaVertice && maxWidth > maxHeight) {
+                // ---- Vértice en horizontal: cabina con el riel a la izquierda; arriba no hay barra ----
+                Row(Modifier.fillMaxSize()) {
+                    CompositionLocalProvider(LocalPaginaVisible provides (enPantalla && !tapado)) {
+                        RielVertice(pager, PAGINAS, conexion, irA, alChip)
+                    }
+                    Column(Modifier.weight(1f).fillMaxHeight()) {
+                        LineaCarrera(Modifier.then(deslizar))
+                        avisoDatos()
+                        paginas(Modifier.weight(1f).fillMaxWidth())
+                    }
                 }
-            }
+            } else Column(Modifier.fillMaxSize()) {
             BoxWithConstraints(Modifier.fillMaxWidth()) {
                 val ancho = maxWidth
                 if (temaIntegrado) {
@@ -220,33 +276,8 @@ private fun Principal(
                     }
                 }
             }
-            if (datosMalos) {
-                Text(
-                    "Llegan datos incompletos de la moto. Reinicia el Bluetooth del teléfono.",
-                    color = Paleta.ambar, fontSize = 12.sp,
-                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 4.dp),
-                )
-            }
-            // Con la pantalla apagada (o en otra app) ninguna página cuenta como visible: mapa, brújula y relojes descansan.
-            // collectAsState (no ...WithLifecycle) a propósito: tiene que enterarse justo cuando se deja de ver.
-            val enPantalla by Lanzador.enPantalla.collectAsState()
-            HorizontalPager(
-                state = pager,
-                modifier = Modifier.weight(1f).fillMaxWidth(),
-                beyondViewportPageCount = PAGINAS.size,   // todas armadas: el mapa no se recarga y no hay tirones
-            ) { pagina ->
-                // Las páginas ocultas siguen vivas pero apagan sus relojes y animaciones
-                CompositionLocalProvider(LocalPaginaVisible provides (pager.currentPage == pagina && enPantalla && !tapado)) {
-                    // Todas las páginas se quedan armadas (cambiar de pestaña es instantáneo);
-                    // las que no se ven dejan de actualizarse (ver enVivo()).
-                    when (pagina) {
-                        0 -> PantallaApps()
-                        1 -> PantallaTablero()
-                        2 -> PantallaAuto(onAccesoNotif)
-                        3 -> PantallaMoto()
-                        else -> PantallaAjustes(onAccesoNotif, onVerInicio)
-                    }
-                }
+            avisoDatos()
+            paginas(Modifier.weight(1f).fillMaxWidth())
             }
         }
     }
@@ -256,6 +287,7 @@ private fun Principal(
     Box(Modifier.fillMaxSize()) {
         BannerLogro(Modifier.align(Alignment.TopCenter).padding(top = 64.dp))
         ConfetiPixel(confeti)
+        if (Apariencia.medidorFluidez) MedidorFluidez(Modifier.align(Alignment.BottomEnd).safeDrawingPadding().padding(6.dp))
     }
 
     // Llamada en el iPhone: aparece encima de cualquier pantalla
@@ -263,6 +295,28 @@ private fun Principal(
     val llave = llamada.de + llamada.activa
     if (llamada.activa && ocultarLlamada != llave) {
         DialogoLlamada(llamada.de, llamada.acciones) { ocultarLlamada = llave }
+    }
+}
+
+/**
+ * Medidor de fluidez: cuadros por segundo, tirones (cuadros que se pasaron del tiempo de la pantalla) y el peor
+ * cuadro del último segundo. Verde: menos de 1 % de tirones; ámbar: hasta 5 %; rojo: más.
+ */
+@Composable
+private fun MedidorFluidez(modifier: Modifier = Modifier) {
+    val m by com.xof.ft150ts.Fluidez.medida.collectAsStateWithLifecycle()
+    val color = when {
+        m.fps == 0 -> Paleta.textoSec
+        m.tirones < 1f -> Paleta.verde
+        m.tirones < 5f -> Paleta.ambar
+        else -> Paleta.rojo
+    }
+    Column(
+        modifier.background(Color.Black.copy(alpha = 0.75f)).border(1.dp, color.copy(alpha = 0.7f)).padding(horizontal = 6.dp, vertical = 4.dp),
+        horizontalAlignment = Alignment.End,
+    ) {
+        EtiquetaPixel(if (m.fps > 0) "${m.fps} fps · ${m.hz} hz" else "quieta", color, 7.sp)
+        EtiquetaPixel("tirones ${fmt(m.tirones, 1)}% · peor ${fmt(m.peorMs, 1)} ms", Paleta.textoSec, 6.sp)
     }
 }
 
@@ -294,7 +348,7 @@ private fun DialogoLlamada(de: String, acciones: Boolean, onCerrar: () -> Unit) 
 }
 
 @Composable
-private fun LogoChico() {
+internal fun LogoChico() {
     // Secreto: 7 toques seguidos al logo → MODO XOF (acento Oro XOF, logro secreto y confeti)
     var toques by remember { mutableStateOf(0) }
     var ultimo by remember { mutableStateOf(0L) }
@@ -325,11 +379,14 @@ private fun LogoChico() {
 private fun Pestana(texto: String, activa: Boolean, icono: ImageVector?, onClick: () -> Unit) {
     val color = if (activa) Paleta.texto else Paleta.textoSec
     Column(
-        Modifier.clip(Formas.chip).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 4.dp),
+        // 48 dp de alto como mínimo: se atina fácil aun con guantes
+        Modifier.heightIn(min = 48.dp).clip(Formas.chip).clickable(onClick = onClick).padding(horizontal = 6.dp, vertical = 4.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.Center,
     ) {
         if (icono != null) {
-            Icon(icono, contentDescription = "Ajustes", tint = if (activa) Paleta.lima else color, modifier = Modifier.size(18.dp))
+            Icon(icono, contentDescription = if (icono == Iconos.Apps) "Apps" else "Ajustes",
+                tint = if (activa) Paleta.lima else color, modifier = Modifier.size(18.dp))
         } else {
             // Ícono pixel + nombre de la página
             val arte = when (texto) { "Tablero" -> PIXEL_TABLERO; "Auto" -> PIXEL_MAPA; else -> PIXEL_MOTO }
@@ -360,7 +417,7 @@ private fun Pestana(texto: String, activa: Boolean, icono: ImageVector?, onClick
 }
 
 @Composable
-private fun ChipConexion(c: Conexion, compacto: Boolean = false, onClick: () -> Unit) {
+internal fun ChipConexion(c: Conexion, compacto: Boolean = false, onClick: () -> Unit) {
     val (texto, color) = when (c) {
         Conexion.CONECTADO -> "ON" to Paleta.lima
         Conexion.DEMO -> "DEMO" to Paleta.ambar
@@ -378,6 +435,6 @@ private fun ChipConexion(c: Conexion, compacto: Boolean = false, onClick: () -> 
     ) {
         Box(Modifier.size(7.dp).background(color))   // punto cuadrado, estilo pixel
         Spacer(Modifier.width(6.dp))
-        EtiquetaPixel(texto, Paleta.texto, 7.sp)
+        EtiquetaPixel(texto, Paleta.texto, 8.sp)
     }
 }

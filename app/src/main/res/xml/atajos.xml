@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Atajos del ícono (mantener presionado el ícono de FT150TS): abren la app directo en una sección -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:shortcutId="tablero"
+        android:enabled="true"
+        android:icon="@drawable/ic_frente"
+        android:shortcutShortLabel="@string/atajo_tablero">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.xof.ft150ts"
+            android:targetClass="com.xof.ft150ts.MainActivity">
+            <extra android:name="pagina" android:value="1" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="mapa"
+        android:enabled="true"
+        android:icon="@drawable/ic_frente"
+        android:shortcutShortLabel="@string/atajo_mapa">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.xof.ft150ts"
+            android:targetClass="com.xof.ft150ts.MainActivity">
+            <extra android:name="pagina" android:value="2" />
+        </intent>
+    </shortcut>
+    <shortcut
+        android:shortcutId="moto"
+        android:enabled="true"
+        android:icon="@drawable/ic_frente"
+        android:shortcutShortLabel="@string/atajo_moto">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:targetPackage="com.xof.ft150ts"
+            android:targetClass="com.xof.ft150ts.MainActivity">
+            <extra android:name="pagina" android:value="3" />
+        </intent>
+    </shortcut>
+</shortcuts>

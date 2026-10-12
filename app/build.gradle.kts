@@ -12,8 +12,8 @@ android {
         applicationId = "com.xof.ft150ts"
         minSdk = 26          // Android 8.0 o más nuevo
         targetSdk = 35
-        versionCode = 23
-        versionName = "2.9.2"
+        versionCode = 24
+        versionName = "3.0"
     }
 
     buildTypes {
@@ -65,4 +65,8 @@ dependencies {
 
     // Mapa de OpenStreetMap (no necesita llave de Google)
     implementation("org.osmdroid:osmdroid-android:6.1.18")
+
+    // Pruebas unitarias (solo para compilar/probar; no entran en la app)
+    testImplementation("junit:junit:4.13.2")
+    testImplementation("org.json:json:20240303")   // org.json real (el de Android en pruebas es de mentira)
 }

@@ -158,6 +158,7 @@ object TelefonoMoto {
         scope.launch { Moto.conexion.collect { revisar() } }
         scope.launch { Energia.enMoto.collect { revisar() } }
         scope.launch { ModoSueno.dormido.collect { revisar() } }
+        scope.launch { Reposo.enReposo.collect { revisar() } }
         scope.launch {
             while (isActive) { revisar(); delay(2_000) }
         }
@@ -173,7 +174,8 @@ object TelefonoMoto {
      * (eso último también con la tarjeta conectada).
      */
     private fun revisar() {
-        val enUso = (BleManager.primerPlano || Energia.enMoto.value) && !ModoSueno.dormido.value
+        // En reposo (parada y cargando) los sensores descansan: dar marcha corta la carga y los despierta
+        val enUso = (BleManager.primerPlano || Energia.enMoto.value) && !ModoSueno.dormido.value && !Reposo.enReposo.value
         val rpm = activo.value && !tarjetaActiva() && (enUso || calibrando.value)
         val baches = Baches.activo.value && enUso
         necesitaRpm = rpm

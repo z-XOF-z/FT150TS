@@ -1,5 +1,7 @@
 package com.xof.ft150ts.ui
 
+import android.content.Context
+import android.provider.Settings
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -26,6 +28,7 @@ import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathBuilder
@@ -53,8 +56,27 @@ val temaFilo: Boolean get() = Apariencia.tema == TemaApp.FILO
 val temaPixel: Boolean get() = Apariencia.tema == TemaApp.PIXEL
 /** Tema Táctico: visor militar, esquinas con corchetes y retícula. */
 val temaTactico: Boolean get() = Apariencia.tema == TemaApp.TACTICO
+/** Tema Holo: visor holográfico, las cuatro esquinas a 45°, doble contorno y superficies teñidas del acento. */
+val temaHolo: Boolean get() = Apariencia.tema == TemaApp.HOLO
+/** Tema Ácido: cinta de peligro a 45°, corte grande arriba-izquierda y brillo tóxico (va con verde tóxico o fluorescentes). */
+val temaAcido: Boolean get() = Apariencia.tema == TemaApp.ACIDO
+/** Tema Circuito: pistas de PCB con dobleces a 45°, pads y vías; tarjetas con los cortes en las otras esquinas. */
+val temaCircuito: Boolean get() = Apariencia.tema == TemaApp.CIRCUITO
+/**
+ * Tema Vértice: la línea de carrera. Toma el peso sólido de Carbono y la línea continua de Filo, y cambia la
+ * organización: en horizontal la navegación es un riel a la izquierda (con la velocidad siempre visible), las
+ * tarjetas son "losas" sin contorno y una sola línea del acento une el riel con el contenido.
+ */
+val temaVertice: Boolean get() = Apariencia.tema == TemaApp.VERTICE
 /** Temas con la barra de arriba integrada (segmentos) y marco de visor. */
-val temaIntegrado: Boolean get() = temaFilo || temaPixel || temaTactico
+val temaIntegrado: Boolean get() = temaFilo || temaPixel || temaTactico || temaHolo || temaAcido || temaCircuito || temaVertice
+
+/**
+ * El sistema tiene las animaciones apagadas (Accesibilidad > Quitar animaciones, o escala de animación en 0).
+ * Entonces la app tampoco anima: muestra el cuadro final directo.
+ */
+fun animacionesReducidas(ctx: Context): Boolean =
+    Settings.Global.getFloat(ctx.contentResolver, Settings.Global.ANIMATOR_DURATION_SCALE, 1f) == 0f
 
 /**
  * Colores. El fondo es negro puro (pantalla AMOLED: se ve mejor y gasta menos).
@@ -71,18 +93,26 @@ object Paleta {
     /** Verde fijo para "todo bien" (batería, neutral), no cambia con el acento. */
     val verde = Color(0xFF39E55A)
 
-    // Superficies: sólidas en Carbono, translúcidas en Vidrio, casi negras en Filo (el acento manda)
+    // Superficies: sólidas en Carbono, translúcidas en Vidrio, casi negras en Filo (el acento manda);
+    // en Holo, teñidas con un poquito del acento (se siente como luz proyectada)
     val superficie: Color get() = when {
         esVidrio -> Color(0x17FFFFFF); temaFilo -> Color(0xFF07090A); temaPixel -> Color(0xFF090B09)
-        temaTactico -> Color(0xFF050706); else -> Color(0xFF0E1113)
+        temaTactico -> Color(0xFF050706); temaHolo -> lima.copy(alpha = 0.05f).compositeOver(fondo)
+        temaAcido -> Color(0xFF080905); temaCircuito -> Color(0xFF05090A); temaVertice -> Color(0xFF0C0F11)
+        else -> Color(0xFF0E1113)
     }
     val superficie2: Color get() = when {
         esVidrio -> Color(0x24FFFFFF); temaFilo -> Color(0xFF12171A); temaPixel -> Color(0xFF141814)
-        temaTactico -> Color(0xFF0F1412); else -> Color(0xFF181D20)
+        temaTactico -> Color(0xFF0F1412); temaHolo -> lima.copy(alpha = 0.10f).compositeOver(fondo)
+        temaAcido -> Color(0xFF13160C); temaCircuito -> Color(0xFF0E1618); temaVertice -> Color(0xFF161B1E)
+        else -> Color(0xFF181D20)
     }
     val borde: Color get() = when {
         esVidrio -> Color(0x33FFFFFF); temaFilo -> Color(0xFF222A2E); temaPixel -> Color(0xFF2A332A)
-        temaTactico -> Color(0xFF1C2420); else -> Color(0xFF262D31)
+        temaTactico -> Color(0xFF1C2420); temaHolo -> lima.copy(alpha = 0.30f).compositeOver(fondo)
+        temaAcido -> lima.copy(alpha = 0.22f).compositeOver(Color(0xFF15180D)); temaCircuito -> Color(0xFF1B2A2D)
+        temaVertice -> Color(0xFF242B2F)
+        else -> Color(0xFF262D31)
     }
 
     /** Color de acento elegido (por defecto verde lima de la FT150TS). */
@@ -134,6 +164,31 @@ object Formas {
     private val tacChica = CutCornerShape(CORTE_TACTICO_CHICA.dp)
     private val tacBoton = CutCornerShape(5.dp)
     private val tacChip = CutCornerShape(4.dp)
+    const val CORTE_HOLO_TARJETA = 12
+    const val CORTE_HOLO_CHICA = 7
+    private val holoTarjeta = CutCornerShape(CORTE_HOLO_TARJETA.dp)
+    private val holoChica = CutCornerShape(CORTE_HOLO_CHICA.dp)
+    private val holoBoton = CutCornerShape(topStart = 12.dp, topEnd = 4.dp, bottomEnd = 12.dp, bottomStart = 4.dp)
+    private val holoChip = CutCornerShape(5.dp)
+    const val CORTE_ACIDO_TARJETA = 22
+    const val CORTE_ACIDO_CHICA = 12
+    private val acidoTarjeta = CutCornerShape(topStart = CORTE_ACIDO_TARJETA.dp, topEnd = 0.dp, bottomEnd = 6.dp, bottomStart = 0.dp)
+    private val acidoChica = CutCornerShape(topStart = CORTE_ACIDO_CHICA.dp, topEnd = 0.dp, bottomEnd = 4.dp, bottomStart = 0.dp)
+    private val acidoBoton = CutCornerShape(topStart = 12.dp, topEnd = 0.dp, bottomEnd = 6.dp, bottomStart = 0.dp)
+    private val acidoChip = CutCornerShape(topStart = 7.dp, topEnd = 0.dp, bottomEnd = 3.dp, bottomStart = 0.dp)
+    const val CORTE_CIRCUITO_TARJETA = 14
+    const val CORTE_CIRCUITO_CHICA = 8
+    private val circTarjeta = CutCornerShape(topStart = 0.dp, topEnd = CORTE_CIRCUITO_TARJETA.dp, bottomEnd = 0.dp, bottomStart = CORTE_CIRCUITO_TARJETA.dp)
+    private val circChica = CutCornerShape(topStart = 0.dp, topEnd = CORTE_CIRCUITO_CHICA.dp, bottomEnd = 0.dp, bottomStart = CORTE_CIRCUITO_CHICA.dp)
+    private val circBoton = CutCornerShape(topStart = 0.dp, topEnd = 10.dp, bottomEnd = 0.dp, bottomStart = 10.dp)
+    private val circChip = CutCornerShape(4.dp)
+    // Vértice: un vértice dominante arriba-izquierda (el de la línea de carrera) y un remate corto abajo-derecha
+    const val CORTE_VERTICE_TARJETA = 18
+    const val CORTE_VERTICE_CHICA = 11
+    private val vertTarjeta = CutCornerShape(topStart = CORTE_VERTICE_TARJETA.dp, topEnd = 0.dp, bottomEnd = 8.dp, bottomStart = 0.dp)
+    private val vertChica = CutCornerShape(topStart = CORTE_VERTICE_CHICA.dp, topEnd = 0.dp, bottomEnd = 5.dp, bottomStart = 0.dp)
+    private val vertBoton = CutCornerShape(topStart = 12.dp, topEnd = 0.dp, bottomEnd = 12.dp, bottomStart = 0.dp)
+    private val vertChip = CutCornerShape(topStart = 7.dp, topEnd = 0.dp, bottomEnd = 7.dp, bottomStart = 0.dp)
     private val corteTarjeta = CutCornerShape(topStart = 14.dp, topEnd = 0.dp, bottomEnd = 14.dp, bottomStart = 0.dp)
     private val corteChica = CutCornerShape(topStart = 8.dp, topEnd = 0.dp, bottomEnd = 8.dp, bottomStart = 0.dp)
     private val corteBoton = CutCornerShape(topStart = 10.dp, topEnd = 0.dp, bottomEnd = 10.dp, bottomStart = 0.dp)
@@ -143,10 +198,50 @@ object Formas {
     private val redBoton = RoundedCornerShape(50)
     private val redChip = RoundedCornerShape(50)
 
-    val tarjeta: Shape get() = when { esVidrio -> redTarjeta; temaFilo -> filoTarjeta; temaPixel -> pixTarjeta; temaTactico -> tacTarjeta; else -> corteTarjeta }
-    val chica: Shape get() = when { esVidrio -> redChica; temaFilo -> filoChica; temaPixel -> pixChica; temaTactico -> tacChica; else -> corteChica }
-    val boton: Shape get() = when { esVidrio -> redBoton; temaFilo -> filoBoton; temaPixel -> pixBoton; temaTactico -> tacBoton; else -> corteBoton }
-    val chip: Shape get() = when { esVidrio -> redChip; temaFilo -> filoChip; temaPixel -> pixChip; temaTactico -> tacChip; else -> corteChip }
+    val tarjeta: Shape get() = when {
+        esVidrio -> redTarjeta; temaFilo -> filoTarjeta; temaPixel -> pixTarjeta; temaTactico -> tacTarjeta; temaHolo -> holoTarjeta
+        temaAcido -> acidoTarjeta; temaCircuito -> circTarjeta; temaVertice -> vertTarjeta; else -> corteTarjeta
+    }
+    val chica: Shape get() = when {
+        esVidrio -> redChica; temaFilo -> filoChica; temaPixel -> pixChica; temaTactico -> tacChica; temaHolo -> holoChica
+        temaAcido -> acidoChica; temaCircuito -> circChica; temaVertice -> vertChica; else -> corteChica
+    }
+    val boton: Shape get() = when {
+        esVidrio -> redBoton; temaFilo -> filoBoton; temaPixel -> pixBoton; temaTactico -> tacBoton; temaHolo -> holoBoton
+        temaAcido -> acidoBoton; temaCircuito -> circBoton; temaVertice -> vertBoton; else -> corteBoton
+    }
+    val chip: Shape get() = when {
+        esVidrio -> redChip; temaFilo -> filoChip; temaPixel -> pixChip; temaTactico -> tacChip; temaHolo -> holoChip
+        temaAcido -> acidoChip; temaCircuito -> circChip; temaVertice -> vertChip; else -> corteChip
+    }
+
+    /** Corte del vértice (arriba-izquierda) en Vértice; 0 si no aplica. */
+    fun corteVertice(forma: Shape): Int = when (forma) {
+        vertTarjeta -> CORTE_VERTICE_TARJETA
+        vertChica -> CORTE_VERTICE_CHICA
+        else -> 0
+    }
+
+    /** Corte grande (arriba-izquierda) en Ácido, para la cinta de peligro; 0 si no aplica. */
+    fun corteAcido(forma: Shape): Int = when (forma) {
+        acidoTarjeta -> CORTE_ACIDO_TARJETA
+        acidoChica -> CORTE_ACIDO_CHICA
+        else -> 0
+    }
+
+    /** Corte de las esquinas en Circuito (arriba-derecha y abajo-izquierda); 0 si no aplica. */
+    fun corteCircuito(forma: Shape): Int = when (forma) {
+        circTarjeta -> CORTE_CIRCUITO_TARJETA
+        circChica -> CORTE_CIRCUITO_CHICA
+        else -> 0
+    }
+
+    /** Corte de las esquinas en Holo (para el contorno interior); 0 si no aplica. */
+    fun corteHolo(forma: Shape): Int = when (forma) {
+        holoTarjeta -> CORTE_HOLO_TARJETA
+        holoChica -> CORTE_HOLO_CHICA
+        else -> 0
+    }
 
     /** Corte de las esquinas en Táctico (para los corchetes). */
     fun corteTactico(forma: Shape): Int = when (forma) {
@@ -260,6 +355,128 @@ fun Modifier.corchetes(corteDp: Int, color: Color): Modifier = drawWithCache {
 }
 
 /**
+ * Holo: un segundo contorno por dentro (paralelo, tenue), la esquina de arriba-izquierda iluminada
+ * y una regla de marcas arriba a la derecha, como un visor que mide. Se dibuja una vez por tamaño.
+ */
+fun Modifier.lineasHolo(corteDp: Int, color: Color): Modifier = if (corteDp <= 0) this else drawWithCache {
+    val c = corteDp.dp.toPx()
+    val d = 3.dp.toPx()
+    val w = size.width
+    val h = size.height
+    // Octágono interior: metido d hacia adentro; el corte a 45° se acorta d·(2−√2)
+    val ci = (c - d * 0.586f).coerceAtLeast(1f)
+    val interior = Path().apply {
+        moveTo(d + ci, d); lineTo(w - d - ci, d); lineTo(w - d, d + ci); lineTo(w - d, h - d - ci)
+        lineTo(w - d - ci, h - d); lineTo(d + ci, h - d); lineTo(d, h - d - ci); lineTo(d, d + ci); close()
+    }
+    val esquina = Path().apply { moveTo(0f, c * 1.8f); lineTo(0f, c); lineTo(c, 0f); lineTo(c * 2.6f, 0f) }
+    val marcas = Path()
+    val paso = 6.dp.toPx()
+    val xIni = w - c - 4.dp.toPx()
+    val y0 = d + 3.dp.toPx()
+    val n = ((w * 0.25f) / paso).toInt().coerceIn(0, 10)
+    for (i in 0 until n) {
+        val x = xIni - i * paso
+        marcas.moveTo(x, y0); marcas.lineTo(x, y0 + if (i % 3 == 0) 5.dp.toPx() else 2.5.dp.toPx())
+    }
+    val fino = Stroke(1.dp.toPx())
+    val grueso = Stroke(2.5.dp.toPx(), join = StrokeJoin.Miter)
+    onDrawWithContent {
+        drawContent()
+        drawPath(interior, color.copy(alpha = 0.16f), style = fino)
+        drawPath(esquina, color, style = grueso)
+        if (w > c * 6) drawPath(marcas, color.copy(alpha = 0.45f), style = fino)
+    }
+}
+
+/**
+ * Ácido: el corte grande de arriba-izquierda en el acento y, detrás, tres franjas paralelas a 45° (como cinta de
+ * peligro que se va apagando); abajo a la derecha un pedazo de cinta con rayas a 45°. Se dibuja una vez por tamaño.
+ */
+fun Modifier.cintaAcido(corteDp: Int, color: Color): Modifier = if (corteDp <= 0) this else drawWithCache {
+    val c = corteDp.dp.toPx()
+    val w = size.width
+    val h = size.height
+    val g = 3.dp.toPx()
+    val sep = 6.dp.toPx()
+    val filo = Path().apply { moveTo(0f, c); lineTo(c, 0f) }
+    val franjas = (1..3).map { i -> Path().apply { val k = c + i * sep; moveTo(0f, k); lineTo(k, 0f) } }
+    // Cinta abajo a la derecha: rayas a 45° de 4 dp con huecos de 4 dp
+    val cinta = Path()
+    val alto = 6.dp.toPx()
+    val raya = 4.dp.toPx()
+    val largo = minOf(56.dp.toPx(), w * 0.3f)
+    var x = w - 10.dp.toPx() - largo
+    while (x < w - 10.dp.toPx()) {
+        cinta.moveTo(x, h); cinta.lineTo(x + raya, h); cinta.lineTo(x + raya + alto, h - alto); cinta.lineTo(x + alto, h - alto); cinta.close()
+        x += raya * 2
+    }
+    onDrawWithContent {
+        drawContent()
+        franjas.forEachIndexed { i, p -> drawPath(p, color.copy(alpha = 0.55f - i * 0.17f), style = Stroke(g)) }
+        drawPath(filo, color, style = Stroke(g * 1.2f))
+        if (w > c * 5) drawPath(cinta, color.copy(alpha = 0.55f))
+    }
+}
+
+/**
+ * Circuito: los dos cortes marcados (arriba-derecha fuerte, abajo-izquierda tenue), una pista que sale de un pad
+ * arriba a la izquierda, dobla a 45° y acaba en una vía, y una fila de pines abajo a la derecha.
+ */
+fun Modifier.pistasCircuito(corteDp: Int, color: Color): Modifier = if (corteDp <= 0) this else drawWithCache {
+    val c = corteDp.dp.toPx()
+    val w = size.width
+    val h = size.height
+    val g = 2.5.dp.toPx()
+    val pad = 5.dp.toPx()
+    val m = 7.dp.toPx()
+    val x1 = minOf(w * 0.3f, 90.dp.toPx())
+    val baja = 6.dp.toPx()
+    val pista = Path().apply { moveTo(m + pad, m + pad / 2); lineTo(x1, m + pad / 2); lineTo(x1 + baja, m + pad / 2 + baja) }
+    val via = Offset(x1 + baja + 2.dp.toPx(), m + pad / 2 + baja + 2.dp.toPx())
+    val corteA = Path().apply { moveTo(w - c, 0f); lineTo(w, c) }
+    val corteB = Path().apply { moveTo(0f, h - c); lineTo(c, h) }
+    val pin = 2.5.dp.toPx()
+    val fino = Stroke(1.2.dp.toPx())
+    onDrawWithContent {
+        drawContent()
+        drawPath(corteA, color, style = Stroke(g))
+        drawPath(corteB, color.copy(alpha = 0.45f), style = Stroke(g))
+        if (w > c * 5) {
+            drawRect(color.copy(alpha = 0.7f), Offset(m, m), Size(pad, pad), style = fino)
+            drawPath(pista, color.copy(alpha = 0.45f), style = fino)
+            drawCircle(color.copy(alpha = 0.6f), 2.2.dp.toPx(), via, style = fino)
+            for (i in 0 until 4) drawRect(color.copy(alpha = 0.45f), Offset(w - 12.dp.toPx() - i * 7.dp.toPx(), h - 7.dp.toPx()), Size(pin, pin))
+        }
+    }
+}
+
+/**
+ * Vértice — losa: sin contorno. El corte de arriba-izquierda (el vértice) se marca grueso en el acento y sigue un
+ * tramo por arriba; detrás corre una luz de borde que se desvanece hacia la derecha. Así las tarjetas pesan como
+ * Carbono pero no se ven como cajas. Se dibuja una vez por tamaño.
+ */
+fun Modifier.losaVertice(corteDp: Int, color: Color): Modifier = drawWithCache {
+    val c = corteDp.dp.toPx()
+    val w = size.width
+    val g = 3.dp.toPx()
+    val vertice = Path().apply {
+        if (c > 0f) { moveTo(0f, c * 1.6f); lineTo(0f, c); lineTo(c, 0f); lineTo(c * 2.4f, 0f) }
+    }
+    val inicioLuz = if (c > 0f) c * 2.4f else 0f
+    val luz = Brush.horizontalGradient(
+        listOf(color.copy(alpha = 0.45f), Color.Transparent),
+        startX = inicioLuz, endX = inicioLuz + (w - inicioLuz) * 0.7f,
+    )
+    val alto = 1.dp.toPx()
+    onDrawWithContent {
+        drawContent()
+        drawRect(luz, Offset(inicioLuz, 0f), Size(w - inicioLuz, alto))
+        if (c > 0f) drawPath(vertice, color, style = Stroke(g, join = StrokeJoin.Miter))
+    }
+}
+
+/**
  * Brillo neón: el contorno se dibuja tres veces cada vez más ancho y más tenue, por fuera de la tarjeta
  * (va antes del clip). Se dibuja una vez por tamaño.
  */
@@ -272,11 +489,15 @@ fun Modifier.resplandor(forma: Shape, color: Color): Modifier = drawWithCache {
     }
 }
 
-/** Adornos del tema en una tarjeta (Filo: acentos HUD, Pixel: escalones, Táctico: corchetes). */
+/** Adornos del tema en una tarjeta (Filo: acentos HUD, Pixel: escalones, Táctico: corchetes, Holo: doble contorno). */
 fun Modifier.decoracionTema(forma: Shape, color: Color): Modifier = when {
     temaFilo -> acentosHud(Formas.corteFilo(forma), color)
     temaPixel -> acentosEscalon(forma, color)
     temaTactico -> corchetes(Formas.corteTactico(forma).coerceAtLeast(3), color)
+    temaHolo -> lineasHolo(Formas.corteHolo(forma), color)
+    temaAcido -> cintaAcido(Formas.corteAcido(forma), color)
+    temaCircuito -> pistasCircuito(Formas.corteCircuito(forma), color)
+    temaVertice -> losaVertice(Formas.corteVertice(forma), color)
     else -> this
 }
 
@@ -287,6 +508,12 @@ fun Modifier.decoracionTema(forma: Shape, color: Color): Modifier = when {
 fun Modifier.panel(forma: Shape = Formas.tarjeta, conBorde: Boolean = true): Modifier {
     val neon = Apariencia.neon && conBorde
     val acento = Paleta.lima
+    if (temaVertice) {
+        // Losa: degradado grafito de arriba hacia abajo y, en lugar de contorno, el vértice y la luz de borde
+        val losa = (if (neon) this.resplandor(forma, acento) else this).clip(forma)
+            .background(Brush.verticalGradient(listOf(Paleta.superficie2, Paleta.superficie)))
+        return if (conBorde) losa.losaVertice(Formas.corteVertice(forma), acento) else losa
+    }
     val base = (if (neon) this.resplandor(forma, acento) else this).clip(forma).background(Paleta.superficie)
     if (!conBorde) return base
     return when {
@@ -300,6 +527,8 @@ fun Modifier.panel(forma: Shape = Formas.tarjeta, conBorde: Boolean = true): Mod
             val ancho = if (temaPixel) 2.dp else 1.dp
             val color = when {
                 neon -> acento.copy(alpha = 0.75f)
+                temaHolo -> acento.copy(alpha = 0.55f)
+                temaAcido -> acento.copy(alpha = 0.4f)
                 temaTactico -> Paleta.borde.copy(alpha = 0.6f)
                 else -> Paleta.borde
             }
@@ -319,8 +548,13 @@ fun FondoApp(modifier: Modifier = Modifier) {
     val filo = temaFilo
     val pixel = temaPixel
     val tactico = temaTactico
+    val holo = temaHolo
+    val acido = temaAcido
+    val circuito = temaCircuito
+    val vertice = temaVertice
     val neon = Apariencia.neon
-    val textura = Apariencia.fondo
+    // Vértice trae su propia textura (fibra de carbono): no se le encima la de Ajustes
+    val textura = if (vertice) 3 else Apariencia.fondo
     val acento = Paleta.lima
     val segundo = Paleta.rpmAlta
     Box(
@@ -413,9 +647,116 @@ fun FondoApp(modifier: Modifier = Modifier) {
                     y += p6
                 }
             }
+            // Holo: marco con las cuatro esquinas a 45°, esquinas iluminadas y una regla de marcas abajo
+            val brilloHolo = Brush.radialGradient(
+                listOf(acento.copy(alpha = 0.11f), Color.Transparent),
+                center = Offset(w * 0.08f, h * 0.06f), radius = size.minDimension * 0.9f,
+            )
+            if (holo) {
+                marco.moveTo(m + cm, m); marco.lineTo(w - m - cm, m); marco.lineTo(w - m, m + cm); marco.lineTo(w - m, h - m - cm)
+                marco.lineTo(w - m - cm, h - m); marco.lineTo(m + cm, h - m); marco.lineTo(m, h - m - cm); marco.lineTo(m, m + cm); marco.close()
+                esquinaA.moveTo(m, m + cm * 2f); esquinaA.lineTo(m, m + cm); esquinaA.lineTo(m + cm, m); esquinaA.lineTo(m + cm * 3f, m)
+                esquinaB.moveTo(w - m, h - m - cm * 2f); esquinaB.lineTo(w - m, h - m - cm)
+                esquinaB.lineTo(w - m - cm, h - m); esquinaB.lineTo(w - m - cm * 3f, h - m)
+                val paso = 10.dp.toPx()
+                var x = w * 0.35f
+                var i = 0
+                while (x < w * 0.65f) {
+                    val largo = if (i % 5 == 0) 7.dp.toPx() else 3.dp.toPx()
+                    advertencia.moveTo(x, h - m); advertencia.lineTo(x, h - m - largo)
+                    x += paso; i++
+                }
+            }
+            // Ácido: marco con el corte grande arriba-izquierda, franjas de peligro en dos esquinas y brillo tóxico abajo
+            val franjasAcido = Path()
+            val brilloAcido = Brush.radialGradient(
+                listOf(acento.copy(alpha = 0.13f), Color.Transparent),
+                center = Offset(w * 0.05f, h * 0.95f), radius = size.minDimension * 0.95f,
+            )
+            if (acido) {
+                val ca = cm * 1.5f
+                marco.moveTo(m + ca, m); marco.lineTo(w - m, m); marco.lineTo(w - m, h - m - cm * 0.4f)
+                marco.lineTo(w - m - cm * 0.4f, h - m); marco.lineTo(m, h - m); marco.lineTo(m, m + ca); marco.close()
+                esquinaA.moveTo(m, m + ca * 1.8f); esquinaA.lineTo(m, m + ca); esquinaA.lineTo(m + ca, m); esquinaA.lineTo(m + ca * 2.8f, m)
+                // franjas rellenas a 45° (cinta de peligro): abajo a la izquierda y arriba a la derecha
+                val alto = 9.dp.toPx()
+                val raya = 7.dp.toPx()
+                fun cinta(x0: Float, y: Float, n: Int, abajo: Boolean) {
+                    for (i in 0 until n) {
+                        val x = x0 + i * raya * 2
+                        val s = if (abajo) -1f else 1f
+                        franjasAcido.moveTo(x, y); franjasAcido.lineTo(x + raya, y)
+                        franjasAcido.lineTo(x + raya + alto, y + s * alto); franjasAcido.lineTo(x + alto, y + s * alto); franjasAcido.close()
+                    }
+                }
+                cinta(m + 8.dp.toPx(), h - m, 8, abajo = true)
+                cinta(w - m - 8.dp.toPx() - 8 * raya * 2, m, 8, abajo = false)
+            }
+            // Circuito: pistas de PCB (rectas, un doblez a 45° y otra recta) con pad al inicio y vía al final.
+            // Mismas pistas siempre (semilla fija), acomodadas a una rejilla de 16 dp.
+            val pistas = Path()
+            val vias = ArrayList<Offset>()
+            val pads = ArrayList<Offset>()
+            if (circuito) {
+                val r = java.util.Random(150)
+                val celda = 16.dp.toPx()
+                val cols = (w / celda).toInt().coerceAtLeast(4)
+                val filas = (h / celda).toInt().coerceAtLeast(4)
+                repeat(18) {
+                    var x = (1 + r.nextInt(cols - 2)) * celda
+                    var y = (1 + r.nextInt(filas - 2)) * celda
+                    pads.add(Offset(x, y))
+                    pistas.moveTo(x, y)
+                    val dx = if (r.nextBoolean()) 1f else -1f
+                    val dy = if (r.nextBoolean()) 1f else -1f
+                    x += dx * (2 + r.nextInt(6)) * celda; pistas.lineTo(x, y)
+                    val d = (1 + r.nextInt(3)) * celda
+                    x += dx * d; y += dy * d; pistas.lineTo(x, y)
+                    if (r.nextBoolean()) { y += dy * (1 + r.nextInt(4)) * celda } else { x += dx * (1 + r.nextInt(4)) * celda }
+                    pistas.lineTo(x, y)
+                    vias.add(Offset(x, y))
+                }
+                // Marco con los cortes arriba-derecha y abajo-izquierda
+                marco.moveTo(m, m); marco.lineTo(w - m - cm, m); marco.lineTo(w - m, m + cm); marco.lineTo(w - m, h - m)
+                marco.lineTo(m + cm, h - m); marco.lineTo(m, h - m - cm); marco.close()
+                esquinaA.moveTo(w - m - cm * 3f, m); esquinaA.lineTo(w - m - cm, m); esquinaA.lineTo(w - m, m + cm); esquinaA.lineTo(w - m, m + cm * 2f)
+                esquinaB.moveTo(m + cm * 3f, h - m); esquinaB.lineTo(m + cm, h - m); esquinaB.lineTo(m, h - m - cm); esquinaB.lineTo(m, h - m - cm * 2f)
+            }
+            // Vértice: tejido de fibra de carbono (dos familias de líneas a ±45°) y un chevrón gigante casi invisible
+            // a la derecha, apuntando hacia adelante (el vértice de la curva)
+            val tejidoA = Path()
+            val tejidoB = Path()
+            val chevron = Path()
+            if (vertice) {
+                val paso = 6.dp.toPx()
+                var x = -h
+                while (x < w) { tejidoA.moveTo(x, h); tejidoA.lineTo(x + h, 0f); x += paso }
+                x = 0f
+                while (x < w + h) { tejidoB.moveTo(x, h); tejidoB.lineTo(x - h, 0f); x += paso }
+                val alto = h * 0.62f
+                val cx = w * 0.80f
+                val cy = h * 0.5f
+                val grueso = h * 0.07f
+                chevron.moveTo(cx - alto * 0.5f, cy - alto / 2); chevron.lineTo(cx - alto * 0.5f + grueso, cy - alto / 2)
+                chevron.lineTo(cx + grueso, cy); chevron.lineTo(cx - alto * 0.5f + grueso, cy + alto / 2)
+                chevron.lineTo(cx - alto * 0.5f, cy + alto / 2); chevron.lineTo(cx, cy); chevron.close()
+            }
             val g1 = 1.dp.toPx()
             val g2 = 2.dp.toPx()
             onDrawBehind {
+                if (vertice) {
+                    drawPath(tejidoA, Color.White.copy(alpha = 0.022f), style = Stroke(g1))
+                    drawPath(tejidoB, Color.White.copy(alpha = 0.014f), style = Stroke(g1))
+                    drawPath(chevron, acento.copy(alpha = 0.035f))
+                }
+                if (holo) drawRect(brilloHolo)
+                if (acido) drawRect(brilloAcido)
+                if (circuito) {
+                    drawPath(pistas, acento.copy(alpha = 0.09f), style = Stroke(1.5.dp.toPx(), join = StrokeJoin.Miter))
+                    val lado = 5.dp.toPx()
+                    pads.forEach { drawRect(acento.copy(alpha = 0.14f), Offset(it.x - lado / 2, it.y - lado / 2), Size(lado, lado)) }
+                    vias.forEach { drawCircle(acento.copy(alpha = 0.18f), 3.dp.toPx(), it, style = Stroke(1.5.dp.toPx())) }
+                }
                 if (vidrio) { drawRect(brillo1); drawRect(brillo2) }
                 if (puntos.isNotEmpty()) {
                     drawPoints(puntos, PointMode.Points, Color.White.copy(alpha = if (vidrio) 0.05f else if (pixel) 0.03f else 0.035f),
@@ -434,6 +775,20 @@ fun FondoApp(modifier: Modifier = Modifier) {
                 }
                 if (filo) drawPath(advertencia, acento.copy(alpha = 0.10f), style = Stroke(g2))
                 if (tactico) drawPath(advertencia, acento.copy(alpha = 0.12f), style = Stroke(g1))
+                if (holo) {
+                    if (neon) drawPath(marco, acento.copy(alpha = 0.10f), style = Stroke(6.dp.toPx()))
+                    drawPath(marco, acento.copy(alpha = if (neon) 0.40f else 0.22f), style = Stroke(g1))
+                    drawPath(esquinaA, acento.copy(alpha = 0.85f), style = Stroke(g2))
+                    drawPath(esquinaB, acento.copy(alpha = 0.5f), style = Stroke(g2))
+                    drawPath(advertencia, acento.copy(alpha = 0.28f), style = Stroke(g1))
+                }
+                if (acido || circuito) {
+                    if (neon) drawPath(marco, acento.copy(alpha = 0.10f), style = Stroke(6.dp.toPx()))
+                    drawPath(marco, if (neon) acento.copy(alpha = 0.35f) else Color.White.copy(alpha = 0.07f), style = Stroke(g1))
+                    drawPath(esquinaA, acento.copy(alpha = 0.85f), style = Stroke(if (acido) 3.dp.toPx() else g2))
+                    if (circuito) drawPath(esquinaB, acento.copy(alpha = 0.5f), style = Stroke(g2))
+                }
+                if (acido) drawPath(franjasAcido, acento.copy(alpha = 0.16f))
             }
         }
     )

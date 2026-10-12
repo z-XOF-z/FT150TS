@@ -14,6 +14,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.xof.ft150ts.Apariencia
 
@@ -34,7 +35,9 @@ val LocalArranque = compositionLocalOf { SIN_ARRANQUE }
 @Composable
 fun rememberArranque(): State<Float> {
     val visible = LocalPaginaVisible.current
-    val activo = Apariencia.animEntrada
+    val ctx = LocalContext.current
+    val reducidas = remember { animacionesReducidas(ctx) }
+    val activo = Apariencia.animEntrada && !reducidas
     // Nuevo estado cada vez que la página se vuelve visible (ya arranca en 0: sin un cuadro "de más")
     val p = remember(visible, activo) { mutableFloatStateOf(if (visible && activo) 0f else -1f) }
     LaunchedEffect(p) {

@@ -15,7 +15,7 @@ y está listo para una tarjeta **ESP32** en la moto.
 [![ESP32-S3][esp32-shield]](firmware/ft150ts_dashboard)
 [![Versión][version-shield]](LEEME.md)
 
-### [⬇ Descargar la app (APK v2.9)](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v2.9.apk)
+### [⬇ Descargar la app (APK v3.0)](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v3.0.apk)
 
 **[Qué hace](#qué-hace)** · **[Empezar](#empezar)** · **[La tarjeta ESP32](#la-tarjeta-esp32)** · **[Historial completo](LEEME.md)**
 
@@ -55,7 +55,8 @@ directas) y la app se cambia sola.
 | **Respaldo** | Todos tus datos en un archivo: guárdalo, compártelo o deja el automático semanal. |
 | **Seguridad** | Dashcam en bucle que guarda el video si detecta un golpe, aviso de teléfono caliente, batería del cel. |
 | **Clima y alertas** | Lluvia próxima, huracanes (NHC), sismos (USGS) y clima severo en el tablero. |
-| **Temas** | Carbono, Vidrio, Filo, Pixel y Táctico · efecto neón · 14 colores + uno personalizado · 4 fondos. |
+| **Temas** | **Vértice** (riel lateral, nuevo), Carbono, Vidrio, Filo, Pixel, Táctico, Holo, Ácido y Circuito · efecto neón · 18 colores + uno personalizado · 4 fondos. |
+| **Reposo** | Moto parada y cargando: reloj atenuado o pantalla apagada, GPS en pausa; despierta solo al dar marcha. |
 
 ### La idea en una línea
 
@@ -65,7 +66,7 @@ directas) y la app se cambia sola.
 
 ### 1. Instala la app
 
-**La rápida:** descarga [`FT150TS-v2.9.apk`](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v2.9.apk) en tu
+**La rápida:** descarga [`FT150TS-v3.0.apk`](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v3.0.apk) en tu
 teléfono (Android 8.0 o más nuevo), ábrelo y permite "Instalar apps desconocidas".
 
 **Desde el código:**
@@ -96,8 +97,8 @@ Firmware en [`firmware/ft150ts_dashboard`](firmware/ft150ts_dashboard), placa **
 arduino-cli compile --fqbn espressif:esp32:esp32s3:PartitionScheme=huge_app firmware/ft150ts_dashboard
 ```
 
-Antes de subirlo cambia la contraseña de la red WiFi de la tarjeta (`AP_PASS`) y, si quieres, la de tu casa
-(`STA_SSID` / `STA_PASS`).
+Desde la v1.4 cada tarjeta genera su propia clave de WiFi (se ve por USB al encender o con `wifi clave`) y los
+comandos delicados solo se aceptan de un teléfono vinculado. Detalles en [SEGURIDAD.md](SEGURIDAD.md).
 
 ## Temas
 
@@ -118,6 +119,8 @@ Antes de subirlo cambia la contraseña de la red WiFi de la tarjeta (`AP_PASS`) 
 - [x] Repetición de rodadas coloreada por velocidad
 - [x] Error del velocímetro contra el GPS
 - [x] Logros pixel (y un secreto)
+- [x] Tema Vértice, modo reposo y medidor de fluidez
+- [x] Auditoría de seguridad (WiFi y Bluetooth de la tarjeta, respaldo)
 - [ ] Antirrobo (con la ESP32)
 - [ ] Temperatura del motor, nivel de gasolina real y presión de llantas (con la ESP32)
 
@@ -149,4 +152,4 @@ Hecho por **XOF** para su Italika FT150TS.
 [kotlin-shield]: https://img.shields.io/badge/Kotlin-2.1-9BE22B?style=for-the-badge&logo=kotlin&logoColor=white&labelColor=0E1113
 [compose-shield]: https://img.shields.io/badge/Jetpack%20Compose-Material%203-9BE22B?style=for-the-badge&logo=jetpackcompose&logoColor=white&labelColor=0E1113
 [esp32-shield]: https://img.shields.io/badge/ESP32--S3-firmware-9BE22B?style=for-the-badge&logo=espressif&logoColor=white&labelColor=0E1113
-[version-shield]: https://img.shields.io/badge/versi%C3%B3n-2.9-9BE22B?style=for-the-badge&labelColor=0E1113
+[version-shield]: https://img.shields.io/badge/versi%C3%B3n-3.0-9BE22B?style=for-the-badge&labelColor=0E1113

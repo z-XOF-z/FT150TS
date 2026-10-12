@@ -53,6 +53,7 @@ class MainActivity : ComponentActivity() {
         revisarPermisos()
         ServicioMoto.arrancar(this)       // mantener viva en segundo plano (si está prendido en Ajustes)
         NfcMoto.desdeIntent(intent)       // se abrió acercando la etiqueta NFC del soporte
+        abrirPaginaPedida(intent)         // se abrió desde un atajo del ícono
 
         setContent {
             // Ajustes > Pantalla: girar a lo ancho y brillo al máximo
@@ -67,8 +68,11 @@ class MainActivity : ComponentActivity() {
             val conexion by Moto.conexion.collectAsStateWithLifecycle()
             val enMoto by Energia.enMoto.collectAsStateWithLifecycle()
             val dormida by ModoSueno.dormido.collectAsStateWithLifecycle()
-            LaunchedEffect(modoPantalla, conexion, enMoto, dormida) {
-                val prendida = !dormida && when (modoPantalla) {
+            val reposo by Reposo.enReposo.collectAsStateWithLifecycle()
+            val pantallaReposo by Reposo.pantalla.collectAsStateWithLifecycle()
+            LaunchedEffect(modoPantalla, conexion, enMoto, dormida, reposo, pantallaReposo) {
+                // En reposo con "apagar pantalla": se deja que Android la apague como siempre
+                val prendida = !dormida && !(reposo && pantallaReposo == 1) && when (modoPantalla) {
                     PantallaEncendida.SIEMPRE -> true
                     // "En la moto": conectada por Bluetooth o montado con el switch prendido (carga)
                     PantallaEncendida.CON_MOTO -> conexion == Conexion.CONECTADO || conexion == Conexion.DEMO || enMoto
@@ -96,14 +100,24 @@ class MainActivity : ComponentActivity() {
             // Fluidez: 90/120 Hz si la pantalla los tiene. Con el teléfono caliente baja a 60 Hz y suelta el brillo máximo.
             val protegiendo by Termico.protegiendo.collectAsStateWithLifecycle()
             val nivelCalor by Termico.nivel.collectAsStateWithLifecycle()
-            val fluidez = Apariencia.fluidez && !protegiendo
+            // En reposo también baja a 60 Hz: nada se mueve en pantalla, no hace falta más
+            val fluidez = Apariencia.fluidez && !protegiendo && !reposo
             LaunchedEffect(fluidez) { Pantalla.aplicar(this@MainActivity, fluidez) }
             val brillo = brilloMax && !(protegiendo && nivelCalor == NivelCalor.MUY_CALIENTE)
-            LaunchedEffect(brillo) {
+            // Reloj de reposo: brillo mínimo (en AMOLED casi todo el panel queda apagado)
+            val atenuar = reposo && pantallaReposo == 0
+            LaunchedEffect(brillo, atenuar) {
                 window.attributes = window.attributes.apply {
-                    screenBrightness = if (brillo) 1f else WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    screenBrightness = when {
+                        atenuar -> 0.04f
+                        brillo -> 1f
+                        else -> WindowManager.LayoutParams.BRIGHTNESS_OVERRIDE_NONE
+                    }
                 }
             }
+            // Medidor de fluidez (Ajustes > Pantalla): tiempos reales de cada cuadro
+            val medidor = Apariencia.medidorFluidez
+            LaunchedEffect(medidor) { if (medidor) Fluidez.iniciar(this@MainActivity) else Fluidez.detener() }
             // La dashcam pide el permiso de la cámara
             val pideCamara by Dashcam.pedirPermiso.collectAsStateWithLifecycle()
             LaunchedEffect(pideCamara) { if (pideCamara) pedirCamara.launch(Manifest.permission.CAMERA) }
@@ -121,6 +135,7 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         NfcMoto.desdeIntent(intent)
+        abrirPaginaPedida(intent)
         if (intent.hasCategory(Intent.CATEGORY_HOME)) {
             val enMano = Energia.detectarCarga.value && Energia.alQuitarApps.value && !Energia.enMoto.value
             Lanzador.irA(if (enMano) PAGINA_APPS else PAGINA_TABLERO)
@@ -131,6 +146,7 @@ class MainActivity : ComponentActivity() {
     override fun onUserInteraction() {
         super.onUserInteraction()
         ModoSueno.actividad()
+        Reposo.actividad()
     }
 
     override fun onStart() {
@@ -167,6 +183,20 @@ class MainActivity : ComponentActivity() {
         // Sin pantalla el GPS solo sigue prendido si le está prestando ubicación a la moto
         // (o si el teléfono está haciendo de sensor de la moto: necesita la velocidad)
         if (!(BleManager.conectado() && Moto.enviarGps.value) && !TelefonoMoto.trabajando.value) UbicacionManager.pausar()
+    }
+
+    /**
+     * Atajo del ícono: el extra "pagina" dice a qué sección ir. Cualquier app puede abrir esta pantalla, así que
+     * solo se acepta un número de página válido y lo único que hace es cambiar de sección.
+     */
+    private fun abrirPaginaPedida(i: Intent?) {
+        val p = i?.getStringExtra("pagina")?.toIntOrNull() ?: return
+        if (p in PAGINA_APPS..4) Lanzador.irA(p)
+    }
+
+    override fun onDestroy() {
+        Fluidez.detener()     // suelta la ventana (si no, el medidor la retendría)
+        super.onDestroy()
     }
 
     private fun aplicarBarras(b: BarrasSistema) {
@@ -208,10 +238,17 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun activarBluetooth() {
+        // Android 12+: pedir prender el Bluetooth necesita el permiso de conexión; si falta, primero se pide
+        if (Build.VERSION.SDK_INT >= 31 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.BLUETOOTH_CONNECT) != PackageManager.PERMISSION_GRANTED
+        ) {
+            revisarPermisos()
+            return
+        }
         try {
             startActivity(Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE))
         } catch (_: Exception) {
-            startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS))
+            try { startActivity(Intent(Settings.ACTION_BLUETOOTH_SETTINGS)) } catch (_: Exception) { }
         }
     }
 }

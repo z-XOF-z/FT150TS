@@ -88,6 +88,8 @@
                 <category android:name="android.intent.category.DEFAULT" />
                 <data android:scheme="ft150ts" android:host="moto" />
             </intent-filter>
+            <!-- Atajos del ícono (Tablero, Mapa, Moto) -->
+            <meta-data android:name="android.app.shortcuts" android:resource="@xml/atajos" />
         </activity>
 
         <!-- Modo launcher: apagado de fábrica, se prende en Ajustes > Launcher -->

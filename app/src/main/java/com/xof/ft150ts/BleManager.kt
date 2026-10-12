@@ -44,6 +44,20 @@ object BleManager {
     /** true mientras la app está en pantalla (busca más rápido). */
     @Volatile var primerPlano = true
 
+    /**
+     * Seguridad: el servicio de la moto usa los UUID del "Nordic UART", que traen miles de aparatos BLE.
+     * Por eso la app ya no se queda con el primero que aparezca:
+     * 1) Verifica que tenga las 4 características de la tarjeta FT150TS (un aparato genérico solo trae 2);
+     *    si no, se desconecta sin mandarle nada y lo ignora por el resto de la sesión.
+     * 2) Se queda con la primera tarjeta verificada ("fijada"): de ahí en adelante solo se conecta a esa
+     *    dirección. "Olvidar tarjeta" (Ajustes > Conexión) la suelta para vincular otra.
+     * 3) Pide vincularse (enlace cifrado) con la app en pantalla; el firmware 1.4 exige ese enlace para los
+     *    comandos delicados (corte de motor, calibraciones, borrar datos).
+     */
+    val tarjetaFijada = kotlinx.coroutines.flow.MutableStateFlow<String?>(null)
+    private val ignorados = HashSet<String>()
+    private var prefs: android.content.SharedPreferences? = null
+
     private lateinit var ctx: Context
     private var adapter: BluetoothAdapter? = null
     private var gatt: BluetoothGatt? = null
@@ -60,6 +74,18 @@ object BleManager {
         ctx = c.applicationContext
         val bm = ctx.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         adapter = bm.adapter
+        val p = ctx.getSharedPreferences("ble", Context.MODE_PRIVATE)
+        prefs = p
+        tarjetaFijada.value = p.getString("tarjeta", null)?.takeIf { BluetoothAdapter.checkBluetoothAddress(it) }
+    }
+
+    /** Suelta la tarjeta fijada: la próxima tarjeta FT150TS verificada que aparezca se fija. */
+    fun olvidarTarjeta() {
+        tarjetaFijada.value = null
+        prefs?.edit()?.remove("tarjeta")?.apply()
+        ignorados.clear()
+        desconectar()
+        conectar()
     }
 
     private fun permiso(p: String) =
@@ -117,6 +143,11 @@ object BleManager {
     private val scanCallback = object : ScanCallback() {
         override fun onScanResult(callbackType: Int, result: ScanResult) {
             if (!escaneando) return
+            val dir = result.device.address
+            // Un aparato que ya resultó no ser la tarjeta, o una tarjeta distinta a la fijada: se sigue buscando
+            if (dir in ignorados) return
+            val fijada = tarjetaFijada.value
+            if (fijada != null && !fijada.equals(dir, ignoreCase = true)) return
             detenerEscaneo()
             conectarA(result.device)
         }
@@ -131,7 +162,10 @@ object BleManager {
         val scanner = adapter?.bluetoothLeScanner
         if (scanner == null) { reintentar(); return }
         Moto.conexion.value = Conexion.BUSCANDO
-        val filtros = listOf(
+        // Con una tarjeta fijada solo se busca esa dirección (el radio filtra solo: gasta menos)
+        val fijada = tarjetaFijada.value
+        val filtros = if (fijada != null) listOf(ScanFilter.Builder().setDeviceAddress(fijada).build())
+        else listOf(
             ScanFilter.Builder().setServiceUuid(ParcelUuid(SERVICIO)).build(),
             ScanFilter.Builder().setDeviceName(NOMBRE).build(),
         )
@@ -206,13 +240,29 @@ object BleManager {
         override fun onServicesDiscovered(g: BluetoothGatt, status: Int) {
             handler.post {
                 val s = g.getService(SERVICIO)
-                if (s == null) { g.disconnect(); return@post }
-                chNotif = s.getCharacteristic(NOTIF)
-                chCmd = s.getCharacteristic(CMD)
-                val tel = s.getCharacteristic(TELEM)
-                val resp = s.getCharacteristic(RESP)
-                if (tel != null) encolar { activarNotificaciones(g, tel) }
-                if (resp != null) encolar { activarNotificaciones(g, resp) }
+                val notif = s?.getCharacteristic(NOTIF)
+                val cmd = s?.getCharacteristic(CMD)
+                val tel = s?.getCharacteristic(TELEM)
+                val resp = s?.getCharacteristic(RESP)
+                if (notif == null || cmd == null || tel == null || resp == null) {
+                    // No es la tarjeta FT150TS (p. ej. otro aparato con Nordic UART): no se le manda nada
+                    ignorados += g.device.address
+                    g.disconnect()
+                    return@post
+                }
+                chNotif = notif
+                chCmd = cmd
+                encolar { activarNotificaciones(g, tel) }
+                encolar { activarNotificaciones(g, resp) }
+                // Primera tarjeta verificada: se fija
+                if (tarjetaFijada.value == null) {
+                    tarjetaFijada.value = g.device.address
+                    prefs?.edit()?.putString("tarjeta", g.device.address)?.apply()
+                }
+                // Vincular (enlace cifrado), solo con la app a la vista: Android muestra su ventana de confirmación
+                if (primerPlano && g.device.bondState == BluetoothDevice.BOND_NONE) {
+                    try { g.device.createBond() } catch (_: Exception) { }
+                }
                 Moto.conexion.value = Conexion.CONECTADO
                 // Al conectar: pone la hora del teléfono en el reloj de la moto y pide el mantenimiento
                 val hora = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())

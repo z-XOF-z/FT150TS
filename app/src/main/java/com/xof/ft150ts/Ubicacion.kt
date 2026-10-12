@@ -163,7 +163,7 @@ object UbicacionManager {
                     GnssStatus.CONSTELLATION_QZSS -> "QZSS"
                     else -> "Otro"
                 }
-                if (Build.VERSION.SDK_INT >= 26 && status.hasCarrierFrequencyHz(i) && status.getCarrierFrequencyHz(i) < 1.2e9f) l5 = true
+                if (status.hasCarrierFrequencyHz(i) && status.getCarrierFrequencyHz(i) < 1.2e9f) l5 = true
             }
             estado.value = estado.value.copy(
                 usados = usados, visibles = status.satelliteCount, dobleFrecuencia = l5,

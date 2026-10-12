@@ -31,6 +31,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -58,9 +59,16 @@ private val ESTADOS = listOf("INICIANDO", "BLUETOOTH", "GPS", "SENSORES", "TABLE
 @Composable
 fun PantallaInicio(onTerminar: () -> Unit) {
     val t = remember { Animatable(0f) }
+    val ctx = LocalContext.current
     LaunchedEffect(Unit) {
-        t.animateTo(DURACION, tween(DURACION.toInt(), easing = LinearEasing))
-        delay(120)
+        if (animacionesReducidas(ctx)) {
+            // Animaciones del sistema apagadas: el logo ya armado, un momento, y listo
+            t.snapTo(DURACION)
+            delay(700)
+        } else {
+            t.animateTo(DURACION, tween(DURACION.toInt(), easing = LinearEasing))
+            delay(120)
+        }
         onTerminar()
     }
     val ms = t.value

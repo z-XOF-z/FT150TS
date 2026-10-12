@@ -173,12 +173,40 @@ object Respaldo {
         Logros.desbloquear("respaldo")
     }
 
-    /** Lee un respaldo elegido con el selector; null si no es de esta app. */
+    /** Un respaldo real pesa unos cuantos MB (60 rodadas con su recorrido); más que esto no es un respaldo. */
+    private const val MAX_BYTES = 32 * 1024 * 1024
+    /** Nombres de archivo de ajustes que se aceptan (sin rutas ni caracteres raros). */
+    private val NOMBRE_AJUSTES = Regex("^[A-Za-z0-9_]{1,40}$")
+    /** Rodadas: solo "<número>.json". */
+    private val NOMBRE_RODADA = Regex("^[0-9]{1,15}\\.json$")
+    /**
+     * Ajustes que un respaldo NO trae: los de root. Si no, un archivo ajeno (que te pasen por WhatsApp) podría
+     * marcar el root como concedido y prender comandos root al abrir la app. Se quedan como estén en este teléfono.
+     */
+    private val NO_RESTAURAR = setOf("root")
+
+    /** Lee un respaldo elegido con el selector; null si no es de esta app o es demasiado grande. */
     suspend fun leer(c: Context, uri: Uri): String? = withContext(Dispatchers.IO) {
         try {
-            val t = c.contentResolver.openInputStream(uri)?.use { it.readBytes().toString(Charsets.UTF_8) } ?: return@withContext null
+            val bytes = c.contentResolver.openInputStream(uri)?.use { leerConTope(it) } ?: return@withContext null
+            val t = bytes.toString(Charsets.UTF_8)
             if (JSONObject(t).optString("app") == "FT150TS") t else null
         } catch (_: Exception) { null }
+    }
+
+    /** Lee como mucho [MAX_BYTES]; si el archivo es más grande, null (así un archivo enorme no tumba la app). */
+    private fun leerConTope(entrada: java.io.InputStream): ByteArray? {
+        val salida = java.io.ByteArrayOutputStream()
+        val buf = ByteArray(64 * 1024)
+        var total = 0
+        while (true) {
+            val n = entrada.read(buf)
+            if (n < 0) break
+            total += n
+            if (total > MAX_BYTES) return null
+            salida.write(buf, 0, n)
+        }
+        return salida.toByteArray()
     }
 
     fun info(json: String): InfoRespaldo? = try {
@@ -189,43 +217,91 @@ object Respaldo {
         InfoRespaldo(o.optLong("fecha"), o.optString("version"), n, o.optJSONObject("archivos")?.length() ?: 0)
     } catch (_: Exception) { null }
 
-    /** Escribe todo y reinicia la app. */
+    /** Un valor de ajuste ya leído del respaldo (todavía sin escribir). */
+    internal sealed class Valor {
+        data class B(val v: Boolean) : Valor()
+        data class I(val v: Int) : Valor()
+        data class L(val v: Long) : Valor()
+        data class F(val v: Float) : Valor()
+        data class S(val v: String) : Valor()
+        data class SS(val v: Set<String>) : Valor()
+    }
+
+    /**
+     * Escribe todo y reinicia la app. Primero se lee y se revisa el respaldo COMPLETO; solo si todo está bien se
+     * escribe (antes, un archivo dañado a la mitad dejaba los ajustes a medias). Todo en segundo plano.
+     */
     fun restaurar(c: Context, json: String) {
-        try {
-            val o = JSONObject(json)
-            val prefs = o.getJSONObject("prefs")
-            for (nombre in prefs.keys()) {
-                val datos = prefs.getJSONObject(nombre)
-                val e = c.getSharedPreferences(nombre, Context.MODE_PRIVATE).edit().clear()
-                for (k in datos.keys()) {
-                    val par = datos.getJSONArray(k)
-                    when (par.getString(0)) {
-                        "b" -> e.putBoolean(k, par.getBoolean(1))
-                        "i" -> e.putInt(k, par.getInt(1))
-                        "l" -> e.putLong(k, par.getLong(1))
-                        "f" -> e.putFloat(k, par.getDouble(1).toFloat())
-                        "s" -> e.putString(k, par.getString(1))
-                        "ss" -> {
-                            val a = par.getJSONArray(1)
-                            e.putStringSet(k, (0 until a.length()).map { a.getString(it) }.toSet())
-                        }
-                    }
-                }
-                e.commit()
+        scope.launch {
+            val ok = withContext(Dispatchers.IO) {
+                try {
+                    val (ajustes, rodadas) = revisarRespaldo(json)
+                    escribirRespaldo(c, ajustes, rodadas)
+                    true
+                } catch (_: Exception) { false }
             }
-            val archivos = o.optJSONObject("archivos")
-            if (archivos != null) {
-                val carpeta = File(c.filesDir, "rodadas").apply { mkdirs() }
-                for (ruta in archivos.keys()) {
-                    if (!ruta.startsWith("rodadas/") || ruta.contains("..")) continue
-                    File(carpeta, ruta.removePrefix("rodadas/")).writeText(archivos.getString(ruta))
-                }
-            }
-            mensaje.value = "Restaurado: la app se reinicia…"
-            reiniciarApp(c)
-        } catch (_: Exception) {
-            mensaje.value = "Ese archivo no se pudo leer"
+            if (ok) {
+                mensaje.value = "Restaurado: la app se reinicia…"
+                reiniciarApp(c)
+            } else mensaje.value = "Ese archivo no se pudo leer"
         }
+    }
+
+    /** Lee y valida todo el respaldo sin escribir nada. Lanza excepción si algo no cuadra. (internal: pruebas) */
+    internal fun revisarRespaldo(json: String): Pair<Map<String, Map<String, Valor>>, Map<String, String>> {
+        val o = JSONObject(json)
+        require(o.optString("app") == "FT150TS")
+        val prefs = o.getJSONObject("prefs")
+        val ajustes = LinkedHashMap<String, Map<String, Valor>>()
+        for (nombre in prefs.keys()) {
+            if (!NOMBRE_AJUSTES.matches(nombre) || nombre in NO_RESTAURAR) continue
+            val datos = prefs.getJSONObject(nombre)
+            val valores = LinkedHashMap<String, Valor>()
+            for (k in datos.keys()) {
+                val par = datos.getJSONArray(k)
+                valores[k] = when (par.getString(0)) {
+                    "b" -> Valor.B(par.getBoolean(1))
+                    "i" -> Valor.I(par.getInt(1))
+                    "l" -> Valor.L(par.getLong(1))
+                    "f" -> Valor.F(par.getDouble(1).toFloat())
+                    "s" -> Valor.S(par.getString(1))
+                    "ss" -> { val a = par.getJSONArray(1); Valor.SS((0 until a.length()).map { a.getString(it) }.toSet()) }
+                    else -> continue
+                }
+            }
+            ajustes[nombre] = valores
+        }
+        val rodadas = LinkedHashMap<String, String>()
+        o.optJSONObject("archivos")?.let { archivos ->
+            for (ruta in archivos.keys()) {
+                val nombre = ruta.removePrefix("rodadas/")
+                if (!ruta.startsWith("rodadas/") || !NOMBRE_RODADA.matches(nombre)) continue
+                rodadas[nombre] = archivos.getString(ruta)
+            }
+        }
+        return ajustes to rodadas
+    }
+
+    // commit() a propósito: la app se reinicia justo después y con apply() podría no alcanzar a guardarse.
+    // Ya corre en segundo plano (Dispatchers.IO), así que no traba la pantalla.
+    @android.annotation.SuppressLint("ApplySharedPref")
+    internal fun escribirRespaldo(c: Context, ajustes: Map<String, Map<String, Valor>>, rodadas: Map<String, String>) {
+        for ((nombre, valores) in ajustes) {
+            val e = c.getSharedPreferences(nombre, Context.MODE_PRIVATE).edit().clear()
+            for ((k, v) in valores) {
+                when (v) {
+                    is Valor.B -> e.putBoolean(k, v.v)
+                    is Valor.I -> e.putInt(k, v.v)
+                    is Valor.L -> e.putLong(k, v.v)
+                    is Valor.F -> e.putFloat(k, v.v)
+                    is Valor.S -> e.putString(k, v.v)
+                    is Valor.SS -> e.putStringSet(k, v.v)
+                }
+            }
+            e.commit()
+        }
+        val carpeta = File(c.filesDir, "rodadas").apply { mkdirs() }
+        for ((nombre, texto) in rodadas) File(carpeta, nombre).writeText(texto)
     }
 
     /** Cierra y vuelve a abrir la app (así todo se carga desde lo restaurado, sin que nada lo sobrescriba). */

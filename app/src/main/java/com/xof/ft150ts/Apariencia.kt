@@ -8,7 +8,7 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-enum class TemaApp { CARBONO, VIDRIO, FILO, PIXEL, TACTICO }
+enum class TemaApp { CARBONO, VIDRIO, FILO, PIXEL, TACTICO, HOLO, ACIDO, CIRCUITO, VERTICE }
 enum class EstiloTablero { LCD, CLASICO }
 /** Cuándo se queda prendida la pantalla del teléfono. */
 enum class PantallaEncendida { SIEMPRE, CON_MOTO, NORMAL }
@@ -38,7 +38,14 @@ object Apariencia {
         Acento("Turquesa", 0xFF1DE9B6),
         Acento("Rosa", 0xFFFF5C93),
         Acento("Blanco", 0xFFF4F7F2),
+        // Fluorescentes (v3.0)
+        Acento("Ácido", 0xFFCCFF00),
+        Acento("Verde menta neón", 0xFF00FF9C),
+        Acento("Naranja fluor", 0xFFFF5F1F),
+        Acento("Rosa fluor", 0xFFFF1F8F),
     )
+    /** Cuántos acentos de lista había antes de la v3.0 (para no mover el "Personalizado" ni el Oro ya guardados). */
+    private const val ACENTOS_V2 = 14
     /** Índice del acento "Personalizado" (va después de la lista). */
     val ACENTO_LIBRE: Int get() = ACENTOS.size
     /** Acento secreto "Oro XOF" (se desbloquea tocando 7 veces el logo). */
@@ -107,6 +114,9 @@ object Apariencia {
         private set
     var saturacionLibre by mutableFloatStateOf(1f)
         private set
+    /** Medidor de fluidez en pantalla (cuadros por segundo y % de tirones, medidos por Android). */
+    var medidorFluidez by mutableStateOf(false)
+        private set
 
     /** Color de acento actual (de la lista o el personalizado). */
     fun colorAcento(): Long = when {
@@ -141,7 +151,14 @@ object Apariencia {
         prefs = p
         tema = TemaApp.entries.firstOrNull { it.name == p.getString("tema", "CARBONO") } ?: TemaApp.CARBONO
         secretoXof = p.getBoolean("secretoXof", false)
-        acento = p.getInt("acento", 0).coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size)
+        // Antes de la v3.0 el Personalizado era el 14 y el Oro el 15: se pasan a sus lugares nuevos una sola vez
+        var guardado = p.getInt("acento", 0)
+        if (p.getInt("versionAcentos", 2) < 3) {
+            if (guardado == ACENTOS_V2) guardado = ACENTO_LIBRE
+            else if (guardado == ACENTOS_V2 + 1) guardado = ACENTO_ORO
+            p.edit().putInt("acento", guardado).putInt("versionAcentos", 3).apply()
+        }
+        acento = guardado.coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size)
         estiloTablero = if (p.getString("tablero", "LCD") == "CLASICO") EstiloTablero.CLASICO else EstiloTablero.LCD
         coloresRpm = p.getInt("coloresRpm", 0).coerceIn(0, COLORES_RPM.size - 1)
         siempreHorizontal = p.getBoolean("horizontal", false)
@@ -161,6 +178,7 @@ object Apariencia {
         barraRpm = p.getInt("barraRpm", 0).coerceIn(0, 2)
         tonoLibre = p.getFloat("tonoLibre", 140f)
         saturacionLibre = p.getFloat("saturacionLibre", 1f)
+        medidorFluidez = p.getBoolean("medidorFluidez", false)
     }
 
     private fun guardar() {
@@ -187,8 +205,11 @@ object Apariencia {
             ?.putInt("barraRpm", barraRpm)
             ?.putFloat("tonoLibre", tonoLibre)
             ?.putFloat("saturacionLibre", saturacionLibre)
+            ?.putBoolean("medidorFluidez", medidorFluidez)
             ?.apply()
     }
+
+    fun ponerMedidorFluidez(on: Boolean) { medidorFluidez = on; guardar() }
 
     fun ponerTema(t: TemaApp) { tema = t; guardar() }
     fun ponerAcento(i: Int) { acento = i.coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size); guardar() }

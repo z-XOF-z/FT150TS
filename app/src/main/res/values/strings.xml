@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">FT150TS</string>
     <string name="servicio_notif">FT150TS: notificaciones y música</string>
+    <string name="atajo_tablero">Tablero</string>
+    <string name="atajo_mapa">Mapa</string>
+    <string name="atajo_moto">Moto</string>
 </resources>

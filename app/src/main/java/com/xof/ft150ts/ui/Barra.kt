@@ -87,7 +87,7 @@ fun TiraEstado(modifier: Modifier = Modifier, compacta: Boolean = false) {
             gps.conSenal -> "${gps.usados}"
             gps.visibles > 0 -> "${gps.fuertes}"   // sin posición: los que llegan con buena señal, no los "en uso"
             else -> "--"
-        }, colorGps, 7.sp)
+        }, colorGps, 8.sp)
         Diagonal()
         // Batería del cel: pila pixel + % (+ rayo si carga)
         val pct = bat.pct
@@ -107,7 +107,7 @@ fun TiraEstado(modifier: Modifier = Modifier, compacta: Boolean = false) {
             if (lleno > 0f) drawRect(colorBat, Offset(g * 1.5f, g * 1.5f), Size(lleno, size.height - g * 3))
         }
         if (bat.cargando) IconoPixel(PIXEL_RAYO, Paleta.lima, Modifier.size(width = 7.dp, height = 10.dp))
-        EtiquetaPixel(if (pct >= 0) "$pct%" else "--", colorBat, 7.sp)
+        EtiquetaPixel(if (pct >= 0) "$pct%" else "--", colorBat, 8.sp)
         val c = clima
         if (c != null && !compacta) {
             Diagonal()
@@ -137,7 +137,7 @@ private val CORTE_SEG = 10.dp
 
 /**
  * Segmento con las esquinas de arriba-izquierda y abajo-derecha cortadas a 45° (Filo), en escalones de pixel
- * (Pixel) o casi rectas con cortes chiquitos (Táctico).
+ * (Pixel), casi rectas con cortes chiquitos (Táctico) o las cuatro a 45° (Holo).
  */
 private fun caminoSegmento(x: Float, w: Float, h: Float, corte: Float, p: Path): Path {
     p.reset()
@@ -151,10 +151,16 @@ private fun caminoSegmento(x: Float, w: Float, h: Float, corte: Float, p: Path):
             for (i in 1..pasos) { p.lineTo(x + w - (i - 1) * s, h - corte + i * s); p.lineTo(x + w - i * s, h - corte + i * s) }
             p.lineTo(x, h); p.close()
         }
-        temaTactico -> {
-            val c = corte * 0.35f
+        temaTactico || temaHolo -> {
+            // Táctico: cortes chiquitos; Holo: las cuatro esquinas a 45° más marcadas
+            val c = corte * if (temaHolo) 0.7f else 0.35f
             p.moveTo(x + c, 0f); p.lineTo(x + w - c, 0f); p.lineTo(x + w, c); p.lineTo(x + w, h - c)
             p.lineTo(x + w - c, h); p.lineTo(x + c, h); p.lineTo(x, h - c); p.lineTo(x, c); p.close()
+        }
+        temaCircuito -> {
+            // Circuito: cortes en las otras dos esquinas (arriba-derecha y abajo-izquierda)
+            p.moveTo(x, 0f); p.lineTo(x + w - corte, 0f); p.lineTo(x + w, corte); p.lineTo(x + w, h)
+            p.lineTo(x + corte, h); p.lineTo(x, h - corte); p.close()
         }
         else -> {
             p.moveTo(x + corte, 0f); p.lineTo(x + w, 0f); p.lineTo(x + w, h - corte)
@@ -173,6 +179,7 @@ fun NavegacionFilo(pager: PagerState, paginas: List<String>, onIr: (Int) -> Unit
     val fondoSeg = Paleta.superficie
     val neon = Apariencia.neon
     val tactico = temaTactico
+    val acido = temaAcido
     val camino = remember { Path() }
     val actual = pager.currentPage
 
@@ -212,6 +219,17 @@ fun NavegacionFilo(pager: PagerState, paginas: List<String>, onIr: (Int) -> Unit
             }
             // rayita de luz bajo el resaltado
             drawRect(acento.copy(alpha = 0.35f), Offset(xr + corte, h + 2.dp.toPx()), Size(wr - corte, 1.5.dp.toPx()))
+            if (acido) {
+                // Ácido: tres rayitas a 45° a la izquierda del activo, como cinta de peligro
+                val a = 4.dp.toPx()
+                for (k in 0 until 3) {
+                    val x0 = xr - 5.dp.toPx() - k * (a + 2.dp.toPx())
+                    drawPath(Path().apply {
+                        moveTo(x0 + h * 0.35f, h * 0.3f); lineTo(x0 + h * 0.35f + 1.5.dp.toPx(), h * 0.3f)
+                        lineTo(x0 + 1.5.dp.toPx(), h * 0.7f); lineTo(x0, h * 0.7f); close()
+                    }, acento.copy(alpha = 0.8f - k * 0.25f))
+                }
+            }
         }
         Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(HUECO)) {
             paginas.forEachIndexed { i, nombre ->

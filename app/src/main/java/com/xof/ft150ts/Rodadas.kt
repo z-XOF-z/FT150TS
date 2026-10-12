@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.location.Location
 import android.os.SystemClock
 import java.io.File
+import java.util.Locale
 import kotlin.math.max
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -43,6 +44,8 @@ object Rodadas {
     /** Rodada que se está grabando (resumen en vivo), o null. */
     val enCurso = MutableStateFlow<Rodada?>(null)
     val avisoDescanso = MutableStateFlow(true)
+    /** Al apagar el switch, decir por voz el resumen de la rodada (km, tiempo y máxima). */
+    val resumenVoz = MutableStateFlow(true)
 
     private const val MAX = 60
     private var ctx: Context? = null
@@ -71,7 +74,17 @@ object Rodadas {
         val p = app.getSharedPreferences("rodadas", Context.MODE_PRIVATE)
         prefs = p
         avisoDescanso.value = p.getBoolean("avisoDescanso", true)
+        resumenVoz.value = p.getBoolean("resumenVoz", true)
         lista.value = leerIndice(p.getString("indice", "[]") ?: "[]")
+        // Apagaste el switch (la carga se cortó más de 8 s) con la moto parada: la rodada termina ya,
+        // no 5 min después, y te dice el resumen mientras sigues junto a la moto
+        scope.launch {
+            var antes = Energia.enMoto.value
+            Energia.enMoto.collect { ahora ->
+                if (antes && !ahora && inicio != 0L && UbicacionManager.velocidadKmh() < 5f) terminar(conVoz = true)
+                antes = ahora
+            }
+        }
         // Si la app se cerró a media rodada, se guarda lo que alcanzó a grabar
         scope.launch { withContext(Dispatchers.IO) { recuperarPendiente() } }
         scope.launch { UbicacionManager.ubicacion.collect { l -> if (l != null) nuevaPosicion(l) } }
@@ -156,8 +169,8 @@ object Rodadas {
         )
     }
 
-    /** Cierra la rodada en curso (si fue de menos de 500 m, no se guarda). */
-    fun terminar() {
+    /** Cierra la rodada en curso (si fue de menos de 500 m, no se guarda). [conVoz] = decir el resumen. */
+    fun terminar(conVoz: Boolean = false) {
         if (inicio == 0L) return
         // termina cuando se paró por última vez (no 5 min después)
         val fin = System.currentTimeMillis() - (SystemClock.elapsedRealtime() - ultimoMovimiento)
@@ -169,6 +182,20 @@ object Rodadas {
         File(carpeta(), "pendiente.json").delete()
         if (r.km < 0.5f || pts.size < 3) return
         guardarRodada(r, pts)
+        if (conVoz && resumenVoz.value) Voz.decir(fraseResumen(r))
+    }
+
+    /** "Rodada terminada: 12.4 kilómetros en 25 minutos, máxima de 78." */
+    fun fraseResumen(r: Rodada): String {
+        val km = String.format(Locale.US, "%.1f", r.km).replace(".0", "")
+        val tiempo = if (r.minutos >= 60) "${r.minutos / 60} hora${if (r.minutos >= 120) "s" else ""} ${r.minutos % 60} minutos"
+            else "${r.minutos} minutos"
+        return "Rodada terminada: $km kilómetros en $tiempo, máxima de ${r.vmax.toInt()}."
+    }
+
+    fun ponerResumenVoz(on: Boolean) {
+        resumenVoz.value = on
+        prefs?.edit()?.putBoolean("resumenVoz", on)?.apply()
     }
 
     private fun guardarRodada(r: Rodada, pts: List<PuntoRodada>) {

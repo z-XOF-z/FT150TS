@@ -136,8 +136,8 @@ object ModoSueno {
         }
     }
 
-    /** Algo dice que está en uso o rodando. */
-    private fun moviendose(): Boolean {
+    /** Algo dice que está en uso o rodando (también lo usa el reposo). */
+    fun moviendose(): Boolean {
         if (UbicacionManager.velocidad.value > 5f) return true
         if (TelefonoMoto.info.value.motor) return true
         val tarjeta = Moto.conexion.value == Conexion.CONECTADO

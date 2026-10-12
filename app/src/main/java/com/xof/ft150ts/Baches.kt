@@ -7,6 +7,7 @@ import kotlin.math.abs
 import kotlin.math.atan2
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.roundToLong
 import kotlin.math.sin
 import kotlin.math.sqrt
 import kotlinx.coroutines.CoroutineScope
@@ -35,9 +36,17 @@ object Baches {
 
     private var prefs: SharedPreferences? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
-    private val avisados = HashMap<Int, Long>()    // índice -> cuándo se avisó
+    private val avisados = HashMap<Long, Long>()   // llave del bache (su lugar) -> cuándo se avisó
+    /** Dónde y cuándo se dio cada aviso reciente (para no repetir en la misma cuadra). */
+    private val avisosRecientes = ArrayDeque<Triple<Double, Double, Long>>()
     private var ultimoGuardado = 0L
     private const val MAX = 800
+    /** Una cuadra, más o menos: dentro de esto solo hay un aviso. */
+    private const val CUADRA_M = 100.0
+    /** En un tramo así de largo, máximo dos avisos. */
+    private const val TRAMO_M = 250.0
+    /** Qué tan lejos se buscan baches adelante. */
+    private const val ALCANCE_M = 150.0
 
     /** Golpe mínimo (m/s², ya sin la gravedad) según la sensibilidad. */
     fun umbral(): Float = when (sensibilidad.value) { 0 -> 7f; 2 -> 3.5f; else -> 5f }
@@ -59,7 +68,8 @@ object Baches {
         scope.launch {
             while (isActive) {
                 delay(1_000)
-                if (avisar.value) revisarAdelante()
+                // Parada (reposo) o dormida no hay nada que avisar
+                if (avisar.value && !Reposo.enReposo.value && !ModoSueno.dormido.value) revisarAdelante()
             }
         }
     }
@@ -80,29 +90,63 @@ object Baches {
         if (ahora - ultimoGuardado > 30_000) guardar()
     }
 
-    /** Baches conocidos a menos de 120 m, adelante en tu camino (±25°): aviso por voz una vez. */
+    /** Llave de un bache por su lugar (no por su posición en la lista, que se recorre al borrar los viejos). */
+    private fun llave(b: Bache): Long = ((b.lat * 1e5).roundToLong() shl 32) xor ((b.lon * 1e5).roundToLong() and 0xFFFFFFFFL)
+
+    /**
+     * Baches conocidos adelante en tu camino (±25°, hasta 150 m). Se avisan **por cuadra**, no uno por uno:
+     * un solo aviso que dice cuántos hay ("Cuadra con baches, 4 adelante"), máximo uno cada ~100 m
+     * y máximo dos en un tramo de 250 m. Los que ya se contaron no se vuelven a avisar en 5 min.
+     */
     private fun revisarAdelante() {
         val l = UbicacionManager.ubicacion.value ?: return
         val v = UbicacionManager.velocidadKmh()
         if (v < 20f || !l.hasBearing()) return
         val ahora = System.currentTimeMillis()
-        val rumbo = l.bearing
-        var cerca = -1
-        var dMin = Double.MAX_VALUE
-        lista.value.forEachIndexed { i, b ->
-            val d = distanciaM(l.latitude, l.longitude, b.lat, b.lon)
-            if (d in 15.0..120.0 && d < dMin) {
-                val hacia = rumbo(l.latitude, l.longitude, b.lat, b.lon)
-                val dif = abs(((hacia - rumbo + 540f) % 360f) - 180f)
-                if (dif < 25f && ahora - (avisados[i] ?: 0L) > 90_000L) { cerca = i; dMin = d }
-            }
+        val lat = l.latitude
+        val lon = l.longitude
+        // Se olvidan los avisos de hace más de 3 min
+        while (avisosRecientes.isNotEmpty() && ahora - avisosRecientes.first().third > 180_000L) avisosRecientes.removeFirst()
+        // En esta cuadra ya se avisó (a menos de 100 m o hace menos de 12 s): nada
+        avisosRecientes.lastOrNull()?.let { u ->
+            if (ahora - u.third < 12_000L || distanciaM(u.first, u.second, lat, lon) < CUADRA_M) return
         }
-        if (cerca < 0) return
-        avisados[cerca] = ahora
-        val b = lista.value[cerca]
-        val fuerte = b.fuerza > umbral() * 1.6f
-        Voz.decir(if (fuerte) "Bache fuerte adelante" else "Bache adelante")
-        Moto.ultimaNotif.value = "Bache adelante (${dMin.toInt()} m)"
+        // Ya van dos avisos en este tramo
+        if (avisosRecientes.count { distanciaM(it.first, it.second, lat, lon) < TRAMO_M } >= 2) return
+
+        val rumbo = l.bearing
+        // Recuadro rápido (sin trigonometría) antes de la distancia exacta: así revisar 800 baches cuesta poco
+        val dLat = ALCANCE_M / 111_000.0
+        val dLon = dLat / max(0.2, cos(lat * PI / 180))
+        var n = 0
+        var fuertes = 0
+        var dMin = Double.MAX_VALUE
+        val grupo = ArrayList<Long>()
+        for (b in lista.value) {
+            if (abs(b.lat - lat) > dLat || abs(b.lon - lon) > dLon) continue
+            val d = distanciaM(lat, lon, b.lat, b.lon)
+            if (d < 15.0 || d > ALCANCE_M) continue
+            val dif = abs(((rumbo(lat, lon, b.lat, b.lon) - rumbo + 540f) % 360f) - 180f)
+            if (dif >= 25f) continue
+            val k = llave(b)
+            if (ahora - (avisados[k] ?: 0L) < 300_000L) continue
+            n++
+            grupo += k
+            if (b.fuerza > umbral() * 1.6f) fuertes++
+            if (d < dMin) dMin = d
+        }
+        if (n == 0) return
+        grupo.forEach { avisados[it] = ahora }
+        avisosRecientes.addLast(Triple(lat, lon, ahora))
+        val fuerte = when (fuertes) { 0 -> ""; 1 -> ", uno fuerte"; else -> ", $fuertes fuertes" }
+        val frase = when {
+            n >= 3 -> "Cuadra con baches, $n adelante$fuerte"
+            n == 2 -> "Dos baches adelante$fuerte"
+            fuertes > 0 -> "Bache fuerte adelante"
+            else -> "Bache adelante"
+        }
+        Voz.decir(frase)
+        Moto.ultimaNotif.value = "$frase (${dMin.toInt()} m)"
     }
 
     fun guardar() {

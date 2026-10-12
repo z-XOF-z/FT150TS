@@ -87,6 +87,7 @@ import com.xof.ft150ts.NfcMoto
 import com.xof.ft150ts.NivelCalor
 import com.xof.ft150ts.Pantalla
 import com.xof.ft150ts.PantallaEncendida
+import com.xof.ft150ts.Reposo
 import com.xof.ft150ts.Root
 import com.xof.ft150ts.TelefonoMoto
 import com.xof.ft150ts.TemaApp
@@ -170,7 +171,36 @@ private fun SeccionApariencia() {
                 Apariencia.tema == TemaApp.TACTICO, { Apariencia.ponerTema(TemaApp.TACTICO) },
                 Modifier.weight(1f),
             ) { vistaTactico(Paleta.lima) }
-            Spacer(Modifier.weight(1f))
+            OpcionVisual(
+                "Holo", "Holográfico, 4 cortes a 45°",
+                Apariencia.tema == TemaApp.HOLO, { Apariencia.ponerTema(TemaApp.HOLO) },
+                Modifier.weight(1f),
+            ) { vistaHolo(Paleta.lima) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Ácido", "Cinta de peligro a 45°",
+                Apariencia.tema == TemaApp.ACIDO, { Apariencia.ponerTema(TemaApp.ACIDO) },
+                Modifier.weight(1f),
+            ) { vistaAcido(Paleta.lima) }
+            OpcionVisual(
+                "Circuito", "Pistas de PCB a 45°",
+                Apariencia.tema == TemaApp.CIRCUITO, { Apariencia.ponerTema(TemaApp.CIRCUITO) },
+                Modifier.weight(1f),
+            ) { vistaCircuito(Paleta.lima) }
+            OpcionVisual(
+                "Vértice", "Riel lateral y losas · nuevo",
+                Apariencia.tema == TemaApp.VERTICE, { Apariencia.ponerTema(TemaApp.VERTICE) },
+                Modifier.weight(1f),
+            ) { vistaVertice(Paleta.lima) }
+        }
+        if (Apariencia.tema == TemaApp.VERTICE) {
+            Text(
+                "Vértice cambia la organización: en horizontal la navegación pasa a un riel a la izquierda (lejos de los " +
+                    "ganchos del soporte), arriba queda libre para el tablero y la velocidad, marcha y RPM se ven en " +
+                    "todas las secciones. En vertical usa la barra integrada.",
+                color = Paleta.textoSec, fontSize = 11.sp,
+            )
         }
 
         FilaSwitch("Efecto neón", "Brillo alrededor de las tarjetas, la barra de arriba, el marco y la barra de RPM",
@@ -521,6 +551,147 @@ private fun DrawScope.vistaTactico(acento: Color) {
     corchetes(w * 0.52f, h * 0.67f, w * 0.42f, h * 0.25f)
 }
 
+/** Holo: tarjetas octagonales con doble contorno teñido del acento, esquina iluminada y regla de marcas. */
+private fun DrawScope.vistaHolo(acento: Color) {
+    val w = size.width; val h = size.height
+    drawRect(Brush.radialGradient(listOf(acento.copy(alpha = 0.22f), Color.Transparent), Offset(w * 0.1f, h * 0.1f), w * 0.6f))
+    fun octagono(x: Float, y: Float, ow: Float, oh: Float, c: Float) = Path().apply {
+        moveTo(x + c, y); lineTo(x + ow - c, y); lineTo(x + ow, y + c); lineTo(x + ow, y + oh - c)
+        lineTo(x + ow - c, y + oh); lineTo(x + c, y + oh); lineTo(x, y + oh - c); lineTo(x, y + c); close()
+    }
+    fun tarjeta(x: Float, y: Float, tw: Float, th: Float) {
+        val c = minOf(tw, th) * 0.16f
+        val p = octagono(x, y, tw, th, c)
+        drawPath(p, acento.copy(alpha = 0.07f))
+        drawPath(p, acento.copy(alpha = 0.6f), style = Stroke(1.2f))
+        drawPath(octagono(x + 3f, y + 3f, tw - 6f, th - 6f, c * 0.8f), acento.copy(alpha = 0.2f), style = Stroke(1f))
+        drawLine(acento, Offset(x, y + c * 1.8f), Offset(x, y + c), 2.5f)
+        drawLine(acento, Offset(x, y + c), Offset(x + c, y), 2.5f)
+        drawLine(acento, Offset(x + c, y), Offset(x + c * 2.6f, y), 2.5f)
+        for (i in 0 until 4) {
+            val mx = x + tw - c - 4f - i * 5f
+            drawLine(acento.copy(alpha = 0.5f), Offset(mx, y + 5f), Offset(mx, y + if (i % 3 == 0) 10f else 8f), 1f)
+        }
+    }
+    var x = w * 0.06f
+    listOf(0.09f, 0.21f, 0.21f, 0.21f, 0.09f).forEachIndexed { i, a ->
+        val sw = w * a
+        val p = octagono(x, h * 0.08f, sw, h * 0.15f, h * 0.05f)
+        if (i == 1) drawPath(p, acento) else drawPath(p, acento.copy(alpha = 0.35f), style = Stroke(1.2f))
+        x += sw + w * 0.012f
+    }
+    tarjeta(w * 0.06f, h * 0.36f, w * 0.42f, h * 0.56f)
+    tarjeta(w * 0.52f, h * 0.36f, w * 0.42f, h * 0.25f)
+    tarjeta(w * 0.52f, h * 0.67f, w * 0.42f, h * 0.25f)
+}
+
+/** Ácido: corte grande arriba-izquierda con franjas paralelas, cinta de rayas a 45° y brillo tóxico abajo. */
+private fun DrawScope.vistaAcido(acento: Color) {
+    val w = size.width; val h = size.height
+    drawRect(Brush.radialGradient(listOf(acento.copy(alpha = 0.28f), Color.Transparent), Offset(0f, h), w * 0.6f))
+    fun tarjeta(x: Float, y: Float, tw: Float, th: Float) {
+        val c = minOf(tw, th) * 0.32f
+        val p = Path().apply { moveTo(x + c, y); lineTo(x + tw, y); lineTo(x + tw, y + th - 3f); lineTo(x + tw - 3f, y + th); lineTo(x, y + th); lineTo(x, y + c); close() }
+        drawPath(p, Color(0xFF13160C))
+        drawPath(p, acento.copy(alpha = 0.4f), style = Stroke(1.2f))
+        for (i in 1..3) {
+            val k = c + i * 4f
+            drawLine(acento.copy(alpha = 0.55f - i * 0.15f), Offset(x, y + k), Offset(x + k, y), 2f)
+        }
+        drawLine(acento, Offset(x, y + c), Offset(x + c, y), 2.5f)
+    }
+    // cinta de peligro abajo
+    var cx = w * 0.06f
+    while (cx < w * 0.45f) {
+        drawPath(Path().apply { moveTo(cx, h); lineTo(cx + 4f, h); lineTo(cx + 9f, h - 5f); lineTo(cx + 5f, h - 5f); close() }, acento.copy(alpha = 0.35f))
+        cx += 8f
+    }
+    var x = w * 0.06f
+    listOf(0.09f, 0.21f, 0.21f, 0.21f, 0.09f).forEachIndexed { i, a ->
+        val sw = w * a
+        val c = h * 0.07f
+        val p = Path().apply { moveTo(x + c, h * 0.08f); lineTo(x + sw, h * 0.08f); lineTo(x + sw, h * 0.23f); lineTo(x, h * 0.23f); lineTo(x, h * 0.08f + c); close() }
+        if (i == 1) drawPath(p, acento) else drawPath(p, acento.copy(alpha = 0.3f), style = Stroke(1.2f))
+        x += sw + w * 0.012f
+    }
+    tarjeta(w * 0.06f, h * 0.34f, w * 0.42f, h * 0.52f)
+    tarjeta(w * 0.52f, h * 0.34f, w * 0.42f, h * 0.24f)
+    tarjeta(w * 0.52f, h * 0.62f, w * 0.42f, h * 0.24f)
+}
+
+/** Circuito: pistas a 45° con pads y vías al fondo; tarjetas con cortes arriba-derecha y abajo-izquierda. */
+private fun DrawScope.vistaCircuito(acento: Color) {
+    val w = size.width; val h = size.height
+    val r = java.util.Random(150)
+    repeat(9) {
+        var x = w * (0.05f + r.nextFloat() * 0.9f)
+        var y = h * (0.1f + r.nextFloat() * 0.8f)
+        val p = Path().apply { moveTo(x, y) }
+        drawRect(acento.copy(alpha = 0.3f), Offset(x - 2f, y - 2f), Size(4f, 4f))
+        x += w * 0.12f; p.lineTo(x, y)
+        x += h * 0.12f; y += h * 0.12f; p.lineTo(x, y)
+        drawPath(p, acento.copy(alpha = 0.2f), style = Stroke(1f))
+        drawCircle(acento.copy(alpha = 0.35f), 2.5f, Offset(x, y), style = Stroke(1f))
+    }
+    fun tarjeta(x: Float, y: Float, tw: Float, th: Float) {
+        val c = minOf(tw, th) * 0.2f
+        val p = Path().apply { moveTo(x, y); lineTo(x + tw - c, y); lineTo(x + tw, y + c); lineTo(x + tw, y + th); lineTo(x + c, y + th); lineTo(x, y + th - c); close() }
+        drawPath(p, Color(0xFF0E1618))
+        drawPath(p, Color(0xFF1B2A2D), style = Stroke(1.2f))
+        drawLine(acento, Offset(x + tw - c, y), Offset(x + tw, y + c), 2.5f)
+        drawLine(acento.copy(alpha = 0.45f), Offset(x, y + th - c), Offset(x + c, y + th), 2.5f)
+        drawRect(acento.copy(alpha = 0.7f), Offset(x + 4f, y + 4f), Size(4f, 4f), style = Stroke(1f))
+        drawLine(acento.copy(alpha = 0.45f), Offset(x + 8f, y + 6f), Offset(x + tw * 0.35f, y + 6f), 1f)
+    }
+    var x = w * 0.06f
+    listOf(0.09f, 0.21f, 0.21f, 0.21f, 0.09f).forEachIndexed { i, a ->
+        val sw = w * a
+        val c = h * 0.05f
+        val p = Path().apply { moveTo(x, h * 0.08f); lineTo(x + sw - c, h * 0.08f); lineTo(x + sw, h * 0.08f + c); lineTo(x + sw, h * 0.23f); lineTo(x + c, h * 0.23f); lineTo(x, h * 0.23f - c); close() }
+        if (i == 1) drawPath(p, acento) else drawPath(p, Color(0xFF1B2A2D), style = Stroke(1.2f))
+        x += sw + w * 0.012f
+    }
+    tarjeta(w * 0.06f, h * 0.36f, w * 0.42f, h * 0.56f)
+    tarjeta(w * 0.52f, h * 0.36f, w * 0.42f, h * 0.25f)
+    tarjeta(w * 0.52f, h * 0.67f, w * 0.42f, h * 0.25f)
+}
+
+/** Vértice: riel a la izquierda con la hoja activa, la línea de carrera y losas sin contorno sobre fibra de carbono. */
+private fun DrawScope.vistaVertice(acento: Color) {
+    val w = size.width; val h = size.height
+    var x = -h
+    while (x < w) { drawLine(Color.White.copy(alpha = 0.05f), Offset(x, h), Offset(x + h, 0f), 1f); x += 6f }
+    // riel
+    val rw = w * 0.13f
+    drawRect(Color(0xFF242B2F), Offset(rw, h * 0.05f), Size(1.2f, h * 0.9f))
+    for (i in 0 until 4) {
+        val y = h * (0.22f + i * 0.18f)
+        if (i == 1) {
+            val c = h * 0.05f
+            drawPath(Path().apply { moveTo(w * 0.02f + c, y); lineTo(rw - 3f, y); lineTo(rw - 3f, y + h * 0.13f - c); lineTo(rw - 3f - c, y + h * 0.13f); lineTo(w * 0.02f, y + h * 0.13f); lineTo(w * 0.02f, y + c); close() }, acento)
+            drawRect(acento, Offset(rw - 1f, y), Size(2.5f, h * 0.13f))
+        } else drawRect(Color.White.copy(alpha = 0.25f), Offset(w * 0.045f, y + h * 0.04f), Size(rw * 0.45f, h * 0.05f))
+    }
+    // velocidad arriba del riel
+    drawRect(Color.White.copy(alpha = 0.7f), Offset(w * 0.03f, h * 0.06f), Size(rw * 0.6f, h * 0.08f))
+    // línea de carrera sobre el contenido
+    drawLine(acento, Offset(rw + 4f, h * 0.09f), Offset(rw + 4f + h * 0.04f, h * 0.05f), 2f)
+    drawRect(Brush.horizontalGradient(listOf(acento, Color.Transparent), startX = rw + 8f, endX = w * 0.7f), Offset(rw + 8f, h * 0.05f), Size(w * 0.6f, 2f))
+    // losas: degradado, vértice iluminado, luz de borde (sin contorno)
+    fun losa(lx: Float, ly: Float, lw: Float, lh: Float) {
+        val c = minOf(lw, lh) * 0.22f
+        val p = Path().apply { moveTo(lx + c, ly); lineTo(lx + lw, ly); lineTo(lx + lw, ly + lh - 4f); lineTo(lx + lw - 4f, ly + lh); lineTo(lx, ly + lh); lineTo(lx, ly + c); close() }
+        drawPath(p, Brush.verticalGradient(listOf(Color(0xFF161B1E), Color(0xFF0C0F11)), startY = ly, endY = ly + lh))
+        drawLine(acento, Offset(lx, ly + c * 1.6f), Offset(lx, ly + c), 2.5f)
+        drawLine(acento, Offset(lx, ly + c), Offset(lx + c, ly), 2.5f)
+        drawLine(acento, Offset(lx + c, ly), Offset(lx + c * 2.4f, ly), 2.5f)
+        drawRect(Brush.horizontalGradient(listOf(acento.copy(alpha = 0.5f), Color.Transparent), startX = lx + c * 2.4f, endX = lx + lw * 0.8f), Offset(lx + c * 2.4f, ly), Size(lw * 0.6f, 1f))
+    }
+    losa(w * 0.2f, h * 0.16f, w * 0.44f, h * 0.76f)
+    losa(w * 0.68f, h * 0.16f, w * 0.28f, h * 0.36f)
+    losa(w * 0.68f, h * 0.56f, w * 0.28f, h * 0.36f)
+}
+
 private fun DrawScope.vistaVidrio(acento: Color, segundo: Color) {
     val w = size.width; val h = size.height
     drawRect(Brush.radialGradient(listOf(acento.copy(alpha = 0.55f), Color.Transparent), Offset(w * 0.15f, h * 0.1f), w * 0.55f))
@@ -595,6 +766,10 @@ private fun SeccionPantalla() {
     val ctx = LocalContext.current
     val hz = remember { Pantalla.hzMaximos(ctx) }
     Seccion("Pantalla") {
+        FilaSwitch("Medidor de fluidez",
+            "Muestra en una esquina los cuadros por segundo, el % de tirones (cuadros que tardaron más que la pantalla) " +
+                "y el peor cuadro, medidos por Android. Para comprobar que todo va fluido; apágalo al terminar.",
+            Apariencia.medidorFluidez) { Apariencia.ponerMedidorFluidez(it) }
         Text("Pantalla encendida", color = Paleta.texto, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
         Selector(
             opciones = listOf("Siempre", "Con la moto", "Normal"),
@@ -1043,6 +1218,7 @@ private fun SeccionModoMoto() {
                 }
             }
         }
+        BloqueReposo()
         BloqueSueno(fondo)
         FilaSwitch("Mantener activa en segundo plano",
             "Notificación fija \"App activa\": Android no la cierra y sigue conectada a la moto", fondo) {
@@ -1058,6 +1234,57 @@ private fun SeccionModoMoto() {
                     "y activa Inicio automático.", color = Paleta.textoSec, fontSize = 12.sp)
             }
         }
+    }
+}
+
+/** Reposo: parada y cargando unos minutos → sensores, GPS y 120 Hz descansan; reloj atenuado o pantalla apagada. */
+@Composable
+private fun BloqueReposo() {
+    val activo by Reposo.activo.collectAsStateWithLifecycle()
+    val enReposo by Reposo.enReposo.collectAsStateWithLifecycle()
+    val quieto by Reposo.quietoDesde.collectAsStateWithLifecycle()
+    val minutos by Reposo.minutos.collectAsStateWithLifecycle()
+    val modoPantalla by Reposo.pantalla.collectAsStateWithLifecycle()
+    val evento by Reposo.ultimoEvento.collectAsStateWithLifecycle()
+    val cargando by Energia.cargando.collectAsStateWithLifecycle()
+    val visible = LocalPaginaVisible.current
+    var ahora by remember { mutableLongStateOf(System.currentTimeMillis()) }
+    LaunchedEffect(visible, quieto) {
+        while (visible && quieto > 0L) { ahora = System.currentTimeMillis(); delay(15_000) }
+    }
+    val opciones = listOf(2, 3, 5, 10)
+
+    Subtitulo("Reposo (ahorro de energía)")
+    FilaSwitch("Reposo al estacionar",
+        "Con la moto parada y el teléfono cargando, a los pocos minutos descansan los sensores de vibración, el GPS y " +
+            "los 120 Hz. Al dar marcha (la carga se corta y regresa), al mover el teléfono o al tocar la pantalla, " +
+            "todo vuelve al instante. Es el paso antes del modo sueño.",
+        activo) { Reposo.ponerActivo(it) }
+    if (activo) {
+        Dato(
+            "Ahora",
+            when {
+                enReposo -> "En reposo"
+                !cargando -> "Activa (no está cargando)"
+                quieto > 0L -> {
+                    val falta = ((minutos * 60_000L - (ahora - quieto)) / 60_000L).coerceAtLeast(0L)
+                    "Parada · reposo en ${if (falta == 0L) "menos de 1" else falta} min"
+                }
+                else -> "Activa (en uso o moviéndose)"
+            },
+            if (enReposo) Paleta.lima else Paleta.texto,
+        )
+        Text("Entrar en reposo después de", color = Paleta.texto, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Selector(opciones.map { "$it min" }, opciones.indexOf(minutos).coerceAtLeast(0),
+            { Reposo.ponerMinutos(opciones[it]) }, Modifier.fillMaxWidth())
+        Text("Pantalla en reposo", color = Paleta.texto, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+        Selector(listOf("Reloj atenuado", "Apagar pantalla"), modoPantalla, { Reposo.ponerPantalla(it) }, Modifier.fillMaxWidth())
+        Text(
+            "Reloj atenuado: negro AMOLED con la hora y la batería, al brillo mínimo y moviéndose un poco para no marcar " +
+                "la pantalla. Apagar pantalla: gasta todavía menos; el tablero regresa al prender el teléfono.",
+            color = Paleta.textoSec, fontSize = 11.sp,
+        )
+        if (evento.isNotBlank()) Text(evento, color = Paleta.lima, fontSize = 12.sp)
     }
 }
 
@@ -1480,6 +1707,17 @@ private fun SeccionConexion(onAccesoNotif: () -> Unit) {
     Seccion("Conexión") {
         IphoneAjustes(conexion == Conexion.CONECTADO)
         Dato("Moto", textoConexion(conexion), if (conexion == Conexion.CONECTADO) Paleta.verde else Paleta.texto)
+        val fijada by com.xof.ft150ts.BleManager.tarjetaFijada.collectAsStateWithLifecycle()
+        Dato("Tarjeta fijada", fijada ?: "Ninguna (se fija la primera)", if (fijada != null) Paleta.verde else Paleta.textoSec)
+        Text(
+            "Por seguridad la app solo se conecta a una tarjeta FT150TS verificada y, una vez fijada, solo a esa. " +
+                "La primera vez Android te pedirá vincularla: acepta (el enlace queda cifrado).",
+            color = Paleta.textoSec, fontSize = 11.sp,
+        )
+        if (fijada != null) {
+            BotonDeportivo("Olvidar tarjeta", { com.xof.ft150ts.BleManager.olvidarTarjeta() }, Modifier.fillMaxWidth(),
+                primario = false, color = Paleta.ambar, tamanoTexto = 12.sp)
+        }
         FilaSwitch("Modo demo", "Datos de prueba, sin la moto", demo, Paleta.ambar) { Moto.ponerDemo(it) }
         FilaSwitch("Mandar notificaciones a la moto", "Llamadas y mensajes en la pantalla del tablero", reenviar) { Moto.ponerReenviarNotif(it) }
         FilaSwitch("Prestar el GPS del teléfono", "La moto usa tu ubicación y velocidad (no tiene módulo GPS)", gps) { Moto.ponerEnviarGps(it) }

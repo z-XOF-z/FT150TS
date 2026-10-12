@@ -118,6 +118,7 @@ object Moto {
         NfcMoto.iniciar(app)
         Energia.iniciar(app)
         ModoSueno.iniciar(app)          // después de Energia: necesita saber si está cargando
+        Reposo.iniciar(app)             // el paso antes del modo sueño (parada y cargando unos minutos)
         Baches.iniciar(app)
         TelefonoMoto.iniciar(app)
         OdometroTel.iniciar(app)
