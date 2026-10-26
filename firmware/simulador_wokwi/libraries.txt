@@ -1,0 +1,7 @@
+# Librerías que usa el firmware (Wokwi/Velxio las instalan solas)
+LiquidCrystal I2C
+TinyGPSPlus
+RTClib
+OneWire
+DallasTemperature
+Adafruit NeoPixel

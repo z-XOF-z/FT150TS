@@ -17,6 +17,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -51,6 +52,23 @@ import kotlinx.coroutines.delay
 // Tira de estado (el espacio libre de arriba a la derecha): hora, batería del cel, GPS y clima
 // ------------------------------------------------------------
 
+/** Lo que la tira muestra del GPS: estado (0 sin señal, 1 buscando, 2 con señal), barritas y satélites. */
+@androidx.compose.runtime.Immutable
+private data class ResumenGps(val estado: Int, val llenas: Int, val texto: String)
+
+@androidx.compose.runtime.Immutable
+private data class ResumenBat(val pct: Int, val cargando: Boolean)
+
+private fun resumenGps(g: com.xof.ft150ts.EstadoGps) = ResumenGps(
+    estado = when { g.conSenal -> 2; g.buscando || g.aprox -> 1; else -> 0 },
+    llenas = when { !g.conSenal -> 0; g.precision in 0f..6f -> 4; g.precision in 0f..12f -> 3; g.precision in 0f..25f -> 2; else -> 1 },
+    texto = when {
+        g.conSenal -> "${g.usados}"
+        g.visibles > 0 -> "${g.fuertes}"   // sin posición: los que llegan con buena señal, no los "en uso"
+        else -> "--"
+    },
+)
+
 private fun horaCorta(): String = SimpleDateFormat("HH:mm", Locale.US).format(Date())
 
 @Composable
@@ -59,35 +77,36 @@ fun TiraEstado(modifier: Modifier = Modifier, compacta: Boolean = false) {
     var hora by remember { mutableStateOf(horaCorta()) }
     // La hora se revisa cada 10 s y solo con la app a la vista
     LaunchedEffect(enPantalla) { while (enPantalla) { hora = horaCorta(); delay(10_000) } }
-    val bat by BateriaTel.estado.collectAsStateWithLifecycle()
-    val gps by UbicacionManager.estado.collectAsStateWithLifecycle()
+    // El GPS y la batería cambian varias veces por segundo (precisión, señal, watts…), pero aquí solo se ve un
+    // resumen: la tira se vuelve a armar solo cuando cambia ese resumen (derivedStateOf), no con cada dato.
+    val batE = BateriaTel.estado.collectAsStateWithLifecycle()
+    val gpsE = UbicacionManager.estado.collectAsStateWithLifecycle()
+    val bat by remember { derivedStateOf { batE.value.let { ResumenBat(it.pct, it.cargando) } } }
+    val gps by remember { derivedStateOf { resumenGps(gpsE.value) } }
     val clima by ClimaManager.clima.collectAsStateWithLifecycle()
 
+    if (temaRacing) { TiraRacing(modifier, hora, bat, gps, compacta); return }
     Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(7.dp)) {
         Text(hora, color = Paleta.texto, fontSize = 15.sp, fontFamily = Fuentes.logo)
         Diagonal()
         // GPS: barritas pixel (llenas con señal) + satélites
-        val colorGps = when {
-            gps.conSenal -> Paleta.lima
-            gps.buscando || gps.aprox -> Paleta.ambar
+        val colorGps = when (gps.estado) {
+            2 -> Paleta.lima
+            1 -> Paleta.ambar
             else -> Paleta.textoSec.copy(alpha = 0.6f)
         }
+        val llenas = gps.llenas
         Canvas(Modifier.size(width = 13.dp, height = 11.dp)) {
             val n = 4
             val hueco = 1.5.dp.toPx()
             val w = (size.width - hueco * (n - 1)) / n
-            val llenas = when { !gps.conSenal -> 0; gps.precision in 0f..6f -> 4; gps.precision in 0f..12f -> 3; gps.precision in 0f..25f -> 2; else -> 1 }
             for (i in 0 until n) {
                 val alto = size.height * (0.4f + 0.6f * i / (n - 1))
                 drawRect(if (i < llenas) colorGps else colorGps.copy(alpha = 0.22f),
                     Offset(i * (w + hueco), size.height - alto), Size(w, alto))
             }
         }
-        if (!compacta) EtiquetaPixel(when {
-            gps.conSenal -> "${gps.usados}"
-            gps.visibles > 0 -> "${gps.fuertes}"   // sin posición: los que llegan con buena señal, no los "en uso"
-            else -> "--"
-        }, colorGps, 8.sp)
+        if (!compacta) EtiquetaPixel(gps.texto, colorGps, 8.sp)
         Diagonal()
         // Batería del cel: pila pixel + % (+ rayo si carga)
         val pct = bat.pct
@@ -113,6 +132,44 @@ fun TiraEstado(modifier: Modifier = Modifier, compacta: Boolean = false) {
             Diagonal()
             Text("${c.temp}°", color = Paleta.texto, fontSize = 13.sp, fontWeight = FontWeight.SemiBold)
         }
+    }
+}
+
+/**
+ * Tira del tema Racing Morado (como la barra del tablero morado): hora grande, "MX", barras de señal (del GPS),
+ * batería verde redondeada con el porcentaje. Letra limpia, sin pixeles.
+ */
+@Composable
+private fun TiraRacing(modifier: Modifier, hora: String, bat: ResumenBat, gps: ResumenGps, compacta: Boolean) {
+    Row(modifier, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Text(hora, color = Paleta.texto, fontSize = 17.sp, fontFamily = Fuentes.ui, fontWeight = FontWeight.SemiBold)
+        if (!compacta) Text("MX", color = Paleta.textoSec, fontSize = 9.sp, fontFamily = Fuentes.ui, fontWeight = FontWeight.SemiBold)
+        val colorGps = if (gps.estado == 2) Paleta.texto else Paleta.textoSec.copy(alpha = 0.7f)
+        val llenas = if (gps.estado == 0) 0 else gps.llenas
+        Canvas(Modifier.size(width = 14.dp, height = 12.dp)) {
+            val n = 4
+            val hueco = 1.6.dp.toPx()
+            val w = (size.width - hueco * (n - 1)) / n
+            for (i in 0 until n) {
+                val alto = size.height * (0.35f + 0.65f * i / (n - 1))
+                drawRoundRect(if (i < llenas) colorGps else colorGps.copy(alpha = 0.25f), Offset(i * (w + hueco), size.height - alto), Size(w, alto),
+                    androidx.compose.ui.geometry.CornerRadius(w * 0.3f))
+            }
+        }
+        val pct = bat.pct
+        val relleno = when { pct in 0..15 -> Paleta.rojo; else -> Color(0xFF39FF14) }
+        Canvas(Modifier.size(width = 24.dp, height = 12.dp)) {
+            val g = 1.4.dp.toPx()
+            val cuerpo = size.width - 2.5.dp.toPx()
+            val r = androidx.compose.ui.geometry.CornerRadius(3.dp.toPx())
+            drawRoundRect(Paleta.texto, Offset.Zero, Size(cuerpo, size.height), r, style = Stroke(g))
+            drawRoundRect(Paleta.texto, Offset(cuerpo + 0.5.dp.toPx(), size.height * 0.3f), Size(size.width - cuerpo - 0.5.dp.toPx(), size.height * 0.4f),
+                androidx.compose.ui.geometry.CornerRadius(1.dp.toPx()))
+            val lleno = ((pct.coerceIn(0, 100)) / 100f) * (cuerpo - g * 3)
+            if (lleno > 0f) drawRoundRect(relleno, Offset(g * 1.5f, g * 1.5f), Size(lleno, size.height - g * 3), androidx.compose.ui.geometry.CornerRadius(1.5.dp.toPx()))
+        }
+        if (bat.cargando) IconoPixel(PIXEL_RAYO, Color(0xFF39FF14), Modifier.size(width = 7.dp, height = 10.dp))
+        Text(if (pct >= 0) "$pct%" else "--", color = Paleta.texto, fontSize = 14.sp, fontFamily = Fuentes.ui, fontWeight = FontWeight.SemiBold)
     }
 }
 

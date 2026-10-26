@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Barra de arriba de la ventana flotante (los tres puntos). HyperOS 1: 26dp.
+         1dp y NO 0dp: con 0 el sistema calcula la zona táctil de la barra con escala 0 y se queda con los toques
+         de toda la ventana (los botones de DiPlay no respondían). -->
+    <dimen name="decor_caption_freeform_height_phone">1dp</dimen>
+    <!-- Barra de abajo (la píldora para mover/cerrar). HyperOS 1: 16dp. Mismo motivo: 1dp. -->
+    <dimen name="bottom_caption_height_phone">1dp</dimen>
+    <!-- Zonas de las esquinas para escalar/redimensionar la ventana con el dedo (HyperOS 1: 44dp). Un deslizamiento
+         dentro de CarPlay que empezaba cerca de una esquina encogía la ventana a escala 0.25. 1dp (no 0, por lo de arriba). -->
+    <dimen name="freeform_resize_corner">1dp</dimen>
+    <dimen name="freeform_resize_handle">1dp</dimen>
+</resources>

@@ -34,6 +34,7 @@ import androidx.compose.runtime.snapshotFlow
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
@@ -41,6 +42,8 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawWithCache
+import androidx.compose.ui.graphics.PointMode
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.TextStyle
@@ -216,8 +219,11 @@ fun GraficaPixel(
     modifier: Modifier = Modifier,
     colorPorValor: ((Float) -> Color)? = null,   // ej. RPM: verde / ámbar / azul según la zona
 ) {
-    val vacio = Paleta.superficie2
-    Canvas(modifier.fillMaxWidth().height(70.dp)) {
+    val vacio = Paleta.superficie2.copy(alpha = 0.5f)
+    // Rendimiento: antes eran ~900 drawRect por gráfica (60 columnas x 15 filas) y un color por celda. Ahora las celdas
+    // se agrupan por color y cada grupo es UNA llamada (drawPoints en modo líneas: cada celda es un trazo horizontal
+    // grueso, del alto del bloque). La geometría se arma solo si cambian los datos o el tamaño.
+    Spacer(modifier.fillMaxWidth().height(70.dp).drawWithCache {
         val n = 60
         val hueco = 1.5.dp.toPx()
         val ancho = (size.width - hueco * (n - 1)) / n
@@ -225,17 +231,24 @@ fun GraficaPixel(
         val filas = (size.height / (bloque + hueco)).toInt().coerceAtLeast(1)
         val datos = valores.takeLast(n)
         val inicio = n - datos.size
+        val grupos = LinkedHashMap<Color, ArrayList<Offset>>()
+        val vacias = ArrayList<Offset>()
         for (i in 0 until n) {
             val v = if (i >= inicio) datos[i - inicio] else 0f
             val llenas = if (maximo > 0f) ((v / maximo).coerceIn(0f, 1f) * filas + 0.5f).toInt() else 0
             val x = i * (ancho + hueco)
+            val lleno = if (llenas > 0) colorPorValor?.invoke(v) ?: color else color
             for (f in 0 until filas) {
-                val y = size.height - (f + 1) * (bloque + hueco) + hueco
-                val lleno = colorPorValor?.invoke(v) ?: color
-                drawRect(if (f < llenas) lleno else vacio.copy(alpha = 0.5f), Offset(x, y), Size(ancho, bloque))
+                val yc = size.height - (f + 1) * (bloque + hueco) + hueco + bloque / 2
+                val lista = if (f < llenas) grupos.getOrPut(lleno) { ArrayList() } else vacias
+                lista.add(Offset(x, yc)); lista.add(Offset(x + ancho, yc))
             }
         }
-    }
+        onDrawBehind {
+            if (vacias.isNotEmpty()) drawPoints(vacias, PointMode.Lines, vacio, strokeWidth = bloque, cap = StrokeCap.Butt)
+            for ((c, l) in grupos) drawPoints(l, PointMode.Lines, c, strokeWidth = bloque, cap = StrokeCap.Butt)
+        }
+    })
 }
 
 // ------------------------------------------------------------
@@ -255,7 +268,7 @@ fun MedidorRpm(rpm: Int, shift: Int, vel: Float, marcha: Int, modifier: Modifier
     val aro = Paleta.borde
     val zonaAlta = Paleta.rpmAlta
 
-    Box(modifier.aspectRatio(1f), contentAlignment = Alignment.Center) {
+    Box(modifier.aspectRatio(1f).graphicsLayer(), contentAlignment = Alignment.Center) {
         Canvas(Modifier.fillMaxSize()) {
             val grosor = size.minDimension * 0.075f
             val radio = size.minDimension / 2f - grosor
@@ -358,7 +371,7 @@ fun BarraShift(rpm: Int, shift: Int, modifier: Modifier = Modifier) {
         enRojo -> 8
         else -> ((rpm - inicio) / (shift - inicio) * 8f + 0.5f).toInt().coerceIn(0, 8)
     }
-    Canvas(modifier.fillMaxWidth().height(14.dp)) {
+    Canvas(modifier.fillMaxWidth().height(14.dp).graphicsLayer()) {
         val hueco = 6.dp.toPx()
         val incl = size.height * 0.6f
         val ancho = (size.width - hueco * 7 - incl) / 8

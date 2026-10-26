@@ -1,0 +1,6 @@
+id=ft150ts_sin_barra
+name=FT150TS · Ventanas flotantes sin barra
+version=v1.3
+versionCode=4
+author=XOF
+description=Quita la barra de tres puntos (arriba) y la píldora (abajo) de las ventanas flotantes de HyperOS 1, para que CarPlay ocupe toda la pestaña Auto de FT150TS. Solo superpone dos medidas de SystemUI; se apaga sola si SystemUI falla.

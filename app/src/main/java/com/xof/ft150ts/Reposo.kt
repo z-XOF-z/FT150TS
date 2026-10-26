@@ -62,7 +62,7 @@ object Reposo {
         minutos.value = p.getInt("minutos", 3)
         pantalla.value = p.getInt("pantalla", 0).coerceIn(0, 1)
         ultimoEvento.value = p.getString("evento", "") ?: ""
-        sm = app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(app)
         sensorMov = sm?.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)
         scope.launch {
             while (isActive) {

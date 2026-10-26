@@ -49,6 +49,13 @@ object ModoSueno {
     val proximaRevision = MutableStateFlow(0L)
     /** Lo último que pasó (para Ajustes). */
     val ultimoEvento = MutableStateFlow("")
+    /**
+     * Dormida por el horario nocturno (Nocturno): no hace revisiones de ubicación y no despierta por no estar
+     * cargando. Sí despierta si tocas la pantalla, se conecta la moto o el sensor siente que lo llevas.
+     */
+    val porNoche = MutableStateFlow(false)
+    /** Ya arrancó (si la app no está corriendo, no hay nada que dormir). */
+    val listo: Boolean get() = iniciado
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private val principal = Handler(Looper.getMainLooper())
@@ -77,7 +84,7 @@ object ModoSueno {
         minutosDormir.value = p.getInt("minDormir", 60)
         minutosRevisar.value = p.getInt("minRevisar", 30)
         ultimoEvento.value = p.getString("evento", "") ?: ""
-        sm = app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(app)
         sensorMov = sm?.getDefaultSensor(Sensor.TYPE_SIGNIFICANT_MOTION)
         // Si Android reinició la app mientras dormía y sigue cargando, se vuelve a dormir donde estaba
         if (p.getBoolean("dormido", false) && activo.value && Energia.cargando.value) {
@@ -97,7 +104,7 @@ object ModoSueno {
         // También despierta si lo pones en el soporte con NFC o si se conecta la tarjeta de la moto
         scope.launch { NfcMoto.presente.collect { if (it && dormido.value) despertar("Lo pusiste en el soporte (NFC)") } }
         // Se cortó la corriente (quitaste el cable, o al dar marcha baja el voltaje): despierta al momento
-        scope.launch { Energia.cargando.collect { if (!it && dormido.value) despertar("Se desconectó el cargador") } }
+        scope.launch { Energia.cargando.collect { if (!it && dormido.value && !porNoche.value) despertar("Se desconectó el cargador") } }
         scope.launch { Moto.conexion.collect { if (it == Conexion.CONECTADO && dormido.value) despertar("Se conectó la tarjeta de la moto") } }
     }
 
@@ -105,6 +112,7 @@ object ModoSueno {
 
     private fun vigilar() {
         if (dormido.value) {
+            if (porNoche.value) return                   // la noche la maneja Nocturno
             when {
                 !activo.value -> despertar("Apagaste el modo sueño")
                 !Energia.cargando.value -> despertar("Se desconectó el cargador")
@@ -146,7 +154,12 @@ object ModoSueno {
     }
 
     /** Tocaste la pantalla (MainActivity.onUserInteraction): estás usándolo. */
+    /** Última vez que tocaste la pantalla de la app (reloj). 0 = no desde que arrancó. */
+    @Volatile var ultimoUso = 0L
+        private set
+
     fun actividad() {
+        ultimoUso = System.currentTimeMillis()
         if (dormido.value) { despertar("Tocaste la pantalla"); return }
         if (quietoDesde.value != 0L) quietoDesde.value = System.currentTimeMillis()
     }
@@ -169,7 +182,26 @@ object ModoSueno {
         try { sensorMov?.let { sm?.requestTriggerSensor(movimiento, it) } } catch (_: Exception) { }
         evento("${hora(desde)} · se durmió: $motivo")
         guardar()
-        programarRevisiones()
+        if (porNoche.value) { trabajo?.cancel(); trabajo = null; proximaRevision.value = 0L } else programarRevisiones()
+    }
+
+    /** Dormir por el horario nocturno (sin revisiones de ubicación). Si ya dormía normal, pasa a dormir por la noche. */
+    fun dormirPorNoche() {
+        if (!iniciado || (dormido.value && porNoche.value)) return
+        porNoche.value = true
+        if (dormido.value) {
+            trabajo?.cancel(); trabajo = null; proximaRevision.value = 0L
+            evento("${hora(System.currentTimeMillis())} · sigue dormida: horario nocturno")
+        } else {
+            ancla = posicion() ?: ancla
+            dormir(System.currentTimeMillis(), "Horario nocturno")
+        }
+    }
+
+    /** Termina el sueño de la noche (fin del horario o lo apagaste). No toca un sueño normal. */
+    fun salirDeNoche(motivo: String) {
+        if (!porNoche.value) return
+        if (dormido.value) despertar(motivo) else porNoche.value = false
     }
 
     private fun programarRevisiones() {
@@ -191,6 +223,7 @@ object ModoSueno {
         try { sm?.cancelTriggerSensor(movimiento, sensorMov) } catch (_: Exception) { }
         revisando.value = false
         dormido.value = false
+        porNoche.value = false
         despertoEn = SystemClock.elapsedRealtime()
         proximaRevision.value = 0L
         quietoDesde.value = 0L

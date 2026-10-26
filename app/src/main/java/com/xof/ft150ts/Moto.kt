@@ -110,15 +110,26 @@ object Moto {
         Acciones.iniciar(app)
         Lanzador.iniciar(app)
         Mapas.iniciar(app)
+        CarPlay.iniciar(app)
         Root.iniciar(app)
         Termico.iniciar(app)
         BateriaTel.iniciar(app)
         Luz.iniciar(app)
         Brujula.iniciar(app)
         NfcMoto.iniciar(app)
+        Encendido.iniciar(app)
+        ZonaWifi.iniciar(app)
+        Rutinas.iniciar(app)
+        BluetoothAdmin.iniciar(app)
+        VolumenAuto.iniciar(app)
+        Sonoridad.iniciar(app)
+        GestosCarPlay.iniciar(app)
         Energia.iniciar(app)
         ModoSueno.iniciar(app)          // después de Energia: necesita saber si está cargando
         Reposo.iniciar(app)             // el paso antes del modo sueño (parada y cargando unos minutos)
+        ModoRendimiento.iniciar(app)    // después de Root, Termico y Reposo: los usa para decidir
+        Nocturno.iniciar(app)           // después del modo sueño: lo usa para dormir la app de noche
+        Emergencia.iniciar(app)
         Baches.iniciar(app)
         TelefonoMoto.iniciar(app)
         OdometroTel.iniciar(app)
@@ -153,7 +164,8 @@ object Moto {
                     TelefonoMoto.trabajando.value
                 val r = rapida.value
                 val vel = if (conectada && r.vel >= 0) r.vel else UbicacionManager.velocidadKmh()
-                revisarVelocidad(vel)
+                // El aviso usa la velocidad de la moto o una del GPS que sea creíble (no la de rebote bajo techo)
+                revisarVelocidad(if (conectada && r.vel >= 0) r.vel else UbicacionManager.velocidadConfiableKmh())
                 tick++
                 if (tick % 2 != 0) continue
                 if (vel < 0 && !conectada) continue   // nada que guardar
@@ -163,6 +175,8 @@ object Moto {
         }
     }
 
+    private var seguidasSobreLimite = 0
+
     /** Entra al pasar el límite y sale al bajar 3 km/h de él (así no parpadea de más). */
     private fun revisarVelocidad(vel: Float) {
         // "Según la calle": límite de la calle + 5 km/h de margen; si no se sabe, el fijo
@@ -170,7 +184,10 @@ object Moto {
         val limite = if (modoAvisoVel.value == 1 && calle != null) calle.kmh + 5 else limiteVel.value
         limiteActivo.value = limite
         val antes = excesoVel.value
-        val ahora = avisoVel.value && vel >= 0f && (if (antes) vel > limite - 3 else vel > limite)
+        val pasado = avisoVel.value && vel >= 0f && (if (antes) vel > limite - 3 else vel > limite)
+        // Tiene que sostenerse 2 s: un pico suelto (bache del GPS) no cuenta
+        seguidasSobreLimite = if (pasado) seguidasSobreLimite + 1 else 0
+        val ahora = if (antes) pasado else seguidasSobreLimite >= SeguridadVel.MUESTRAS
         if (ahora && !antes) {
             vibrar()
             if (avisosVoz.value) Voz.decir("Cuidado, vas a más de $limite")
@@ -279,6 +296,7 @@ object Moto {
                         UbicacionManager.agregarPunto(e.lat, e.lon)
                 }
                 "x" -> viaje.value = Protocolo.parseViaje(j)
+                "d" -> FuncionesAvanzadas.recibirDiagnostico(j)
                 "a" -> iphoneMusica.value = Protocolo.parseIphoneMusica(j, SystemClock.elapsedRealtime())
                 "c" -> iphoneLlamada.value = Protocolo.parseIphoneLlamada(j)
                 "i" -> {
@@ -308,6 +326,10 @@ object Moto {
         val limpio = texto.trimEnd()
         if (limpio.startsWith("[")) {
             Protocolo.parseMant(limpio)?.let { mant.value = it }
+            return
+        }
+        if (ProtocoloAvanzado.esEstado(limpio)) {
+            FuncionesAvanzadas.recibirEstado(limpio)
             return
         }
         if (limpio.startsWith("{") && limpio.contains("\"fw\"")) {
@@ -463,7 +485,7 @@ object Moto {
                     shift = if (anterior.perfil == 1) 7400 else 5600,
                     ignicion = true, motor = true,
                 )
-                Estadisticas.muestra(rapida.value)
+                // El demo NO alimenta Estadisticas: antes sumaba km y máximas inventadas a tu viaje real
                 km += v * 0.25f / 3600f
                 odo += v * 0.25f / 3600f
                 vmax = max(vmax, v)

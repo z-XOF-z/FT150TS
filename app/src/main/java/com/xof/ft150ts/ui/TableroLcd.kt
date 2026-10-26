@@ -18,11 +18,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PointMode
+import androidx.compose.ui.graphics.StrokeCap
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.input.pointer.pointerInput
@@ -102,22 +107,30 @@ internal fun anchoPixel(texto: String, px: Float): Float = if (texto.isEmpty()) 
 
 /** Dibuja texto con la letra pixel 5x7. Cada "pixel" es un cuadrito con un hueco, como LCD. */
 internal fun DrawScope.textoPixel(texto: String, x: Float, y: Float, px: Float, color: Color) {
+    // Rendimiento: antes era un drawRect por pixel (cientos por cuadro); ahora todos los pixeles del texto van en
+    // UNA llamada (puntos cuadrados). La lista se reutiliza: no crea objetos al dibujar.
     var cx = x
     val lado = px * 0.84f
+    val medio = lado / 2f
     val vacio = FUENTE_5X7.getValue(' ')
+    val puntos = PUNTOS_TEXTO
+    puntos.clear()
     for (ch in texto) {
         val g = FUENTE_5X7[ch.uppercaseChar()] ?: vacio
         for (fila in 0 until 7) {
             val bits = g[fila]
+            if (bits == 0) continue
             for (col in 0 until 5) {
-                if ((bits shr (4 - col)) and 1 == 1) {
-                    drawRect(color, Offset(cx + col * px, y + fila * px), Size(lado, lado))
-                }
+                if ((bits shr (4 - col)) and 1 == 1) puntos.add(Offset(cx + col * px + medio, y + fila * px + medio))
             }
         }
         cx += 6 * px
     }
+    if (puntos.isNotEmpty()) drawPoints(puntos, PointMode.Points, color, strokeWidth = lado, cap = StrokeCap.Square)
 }
+
+/** Lista reutilizada por textoPixel (se dibuja siempre en el hilo de la pantalla). */
+private val PUNTOS_TEXTO = ArrayList<Offset>(256)
 
 // ============================================================
 // Dígitos de 7 segmentos (inclinados, como LCD de moto)
@@ -244,7 +257,6 @@ fun TableroLcd(modifier: Modifier = Modifier) {
     // Barra de RPM: curva (la original) o diagonal a 45° con bloques inclinados (más agresiva)
     val diagonal = when (Apariencia.barraRpm) { 1 -> false; 2 -> true; else -> temaIntegrado }
     val neon = Apariencia.neon
-    val cacheBarra = remember { CacheBarra() }
 
     Box(
         modifier.aspectRatio(1.7f)
@@ -254,10 +266,12 @@ fun TableroLcd(modifier: Modifier = Modifier) {
             .decoracionTema(forma, acento)
             .pointerInput(Unit) {
                 // Toca la fila de abajo para cambiar TRIP / ODO / RANGO / PROMEDIO
-                detectTapGestures { pos -> if (pos.y > size.height * 0.84f) modoS.intValue = (modoS.intValue + 1) % MODOS.size }
+                // Mantener presionado: siguiente tablero (antes el LCD se quedaba con el toque y el atajo no servía)
+                detectTapGestures(onLongPress = { Apariencia.siguienteTablero() }) { pos -> if (pos.y > size.height * 0.84f) modoS.intValue = (modoS.intValue + 1) % MODOS.size }
             },
     ) {
-        Canvas(Modifier.fillMaxSize().padding(8.dp)) {
+        BarraRpmLcd(rS, agujaS, alfaS, diagonal, neon, acento, alta, Modifier.fillMaxSize().padding(8.dp))
+        Canvas(Modifier.fillMaxSize().padding(8.dp).graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen)) {
             val r = rS.value
             val e = eS.value
             val v = vS.value
@@ -273,79 +287,12 @@ fun TableroLcd(modifier: Modifier = Modifier) {
             val apagado = Color.White.copy(alpha = 0.06f)
             val sec = Paleta.textoSec
 
-            // ---------------- Barra de RPM curva (bloques) ----------------
-            val n = 56
+            // La barra de RPM se dibuja en su propia capa (BarraRpmLcd): este Canvas ya no lee la aguja y solo se
+            // redibuja cuando cambian sus datos (4 veces por segundo), no 30.
             val x0 = 1f * u
             val x1 = w - 1f * u
-            val paso = (x1 - x0) / n
-            val anchoBarra = paso * 0.62f
-            val yPlano = 13f * u
-            val yIni = 66f * u
-            // Diagonal: sube exacto a 45° (lo que sube = lo que avanza) y luego recta
-            val xPlano = if (diagonal) x0 + (yIni - yPlano) else w * 0.40f
-            fun curva(x: Float): Float =
-                if (x >= xPlano) yPlano
-                else if (diagonal) yIni - (x - x0)
-                else {
-                    val t = ((x - x0) / (xPlano - x0)).coerceIn(0f, 1f)
-                    yPlano + (yIni - yPlano) * (1f - sin(t * PI.toFloat() / 2f))
-                }
-            val bloqueH = 2.4f * u
-            val huecoB = 0.9f * u
-            val rpmAguja = agujaS.value
-            val encendidas = if (rpmAguja > 1f) ((rpmAguja / RPM_MAX) * n).toInt().coerceIn(0, n) else 0
-            // Diagonal: cada columna ya armada como un solo camino de bloques inclinados (se arma una vez por tamaño)
-            if (diagonal && (cacheBarra.w != w || cacheBarra.h != size.height || cacheBarra.columnas.size != n)) {
-                cacheBarra.w = w; cacheBarra.h = size.height
-                val inclina = bloqueH * 0.6f
-                cacheBarra.columnas = Array(n) { i ->
-                    val xb = x0 + i * paso
-                    val top = curva(xb + anchoBarra / 2f)
-                    val largo = 10f * u + (15f * u) * (i / (n - 1f))
-                    val bloques = max(1, (largo / (bloqueH + huecoB)).toInt())
-                    Path().apply {
-                        for (b in 0 until bloques) {
-                            val y = top + b * (bloqueH + huecoB)
-                            moveTo(xb + inclina, y); lineTo(xb + inclina + anchoBarra, y)
-                            lineTo(xb + anchoBarra, y + bloqueH); lineTo(xb, y + bloqueH); close()
-                        }
-                    }
-                }
-                // riel: línea delgada encima que sube a 45° y sigue recta, con un corte a 45° al final
-                cacheBarra.riel = Path().apply {
-                    val d = 2.2f * u
-                    moveTo(x0, yIni - d); lineTo(xPlano, yPlano - d); lineTo(x1 - 3f * u, yPlano - d); lineTo(x1, yPlano - d + 3f * u)
-                }
-            }
-            if (diagonal) drawPath(cacheBarra.riel, acento.copy(alpha = 0.45f), style = Stroke(0.35f * u))
-            for (i in 0 until n) {
-                val xb = x0 + i * paso
-                val rpmBarra = ((i + 0.5f) / n * RPM_MAX).toInt()
-                val zona = colorRpm(rpmBarra, r.shift)
-                val prendida = i < encendidas
-                val color = when {
-                    prendida -> if (r.rpm >= r.shift) zona.copy(alpha = alfa) else zona
-                    rpmBarra >= r.shift -> alta.copy(alpha = 0.16f)
-                    else -> apagado
-                }
-                if (diagonal) {
-                    val col = cacheBarra.columnas[i]
-                    // neón: halo alrededor de los bloques prendidos
-                    if (neon && prendida) drawPath(col, color.copy(alpha = 0.28f * color.alpha), style = Stroke(1.1f * u))
-                    drawPath(col, color)
-                } else {
-                    val top = curva(xb + anchoBarra / 2f)
-                    val largo = 10f * u + (15f * u) * (i / (n - 1f))
-                    val bloques = max(1, (largo / (bloqueH + huecoB)).toInt())
-                    if (neon && prendida) {
-                        val altoTotal = bloques * (bloqueH + huecoB) - huecoB
-                        drawRect(color.copy(alpha = 0.22f * color.alpha), Offset(xb - 0.5f * u, top - 0.5f * u), Size(anchoBarra + u, altoTotal + u))
-                    }
-                    for (b in 0 until bloques) {
-                        drawRect(color, Offset(xb, top + b * (bloqueH + huecoB)), Size(anchoBarra, bloqueH))
-                    }
-                }
-            }
+            val g = GeomBarraLcd(w, size.height, diagonal)
+            fun curva(x: Float) = g.curva(x)
             // números x1000
             // el 0 y el 10 quedan pegados a las orillas sin salirse; los demás, repartidos
             val pxN = 1.05f * u
@@ -489,10 +436,86 @@ private fun DrawScope.bloquesInclinados(
     }
 }
 
-/** Columnas de la barra diagonal ya armadas (se rehacen solo si cambia el tamaño). */
-private class CacheBarra {
-    var w = 0f
-    var h = 0f
-    var columnas: Array<Path> = emptyArray()
-    var riel = Path()
+/** Forma de la barra de RPM (curva o diagonal a 45°) para un tamaño. */
+private class GeomBarraLcd(val w: Float, val h: Float, val diagonal: Boolean) {
+    val u = h / 100f
+    val n = 56
+    val x0 = 1f * u
+    val x1 = w - 1f * u
+    val paso = (x1 - x0) / n
+    val anchoBarra = paso * 0.62f
+    val yPlano = 13f * u
+    val yIni = 66f * u
+    val xPlano = if (diagonal) x0 + (yIni - yPlano) else w * 0.40f
+    fun curva(x: Float): Float =
+        if (x >= xPlano) yPlano
+        else if (diagonal) yIni - (x - x0)
+        else {
+            val t = ((x - x0) / (xPlano - x0)).coerceIn(0f, 1f)
+            yPlano + (yIni - yPlano) * (1f - sin(t * PI.toFloat() / 2f))
+        }
+}
+
+/**
+ * Barra de RPM del LCD en su propia capa: es lo único que se mueve 30 veces por segundo. Cada columna (todos sus
+ * bloques) es un solo camino armado una vez por tamaño: en cada cuadro son 56 dibujos en lugar de ~600 rectángulos.
+ */
+@Composable
+private fun BarraRpmLcd(
+    rS: androidx.compose.runtime.State<com.xof.ft150ts.Rapida>, agujaS: androidx.compose.runtime.State<Float>,
+    alfaS: androidx.compose.runtime.State<Float>, diagonal: Boolean, neon: Boolean, acento: Color, alta: Color, modifier: Modifier,
+) {
+    Box(modifier.graphicsLayer().drawWithCache {
+        val g = GeomBarraLcd(size.width, size.height, diagonal)
+        val u = g.u
+        val bloqueH = 2.4f * u
+        val huecoB = 0.9f * u
+        val inclina = if (diagonal) bloqueH * 0.6f else 0f
+        val columnas = Array(g.n) { i ->
+            val xb = g.x0 + i * g.paso
+            val top = g.curva(xb + g.anchoBarra / 2f)
+            val largo = 10f * u + (15f * u) * (i / (g.n - 1f))
+            val bloques = max(1, (largo / (bloqueH + huecoB)).toInt())
+            Path().apply {
+                for (b in 0 until bloques) {
+                    val y = top + b * (bloqueH + huecoB)
+                    moveTo(xb + inclina, y); lineTo(xb + inclina + g.anchoBarra, y)
+                    lineTo(xb + g.anchoBarra, y + bloqueH); lineTo(xb, y + bloqueH); close()
+                }
+            }
+        }
+        // riel de la diagonal: línea delgada encima que sube a 45° y sigue recta, con un corte a 45° al final
+        val riel = Path().apply {
+            val d = 2.2f * u
+            moveTo(g.x0, g.yIni - d); lineTo(g.xPlano, g.yPlano - d); lineTo(g.x1 - 3f * u, g.yPlano - d); lineTo(g.x1, g.yPlano - d + 3f * u)
+        }
+        val halo = Stroke(1.1f * u)
+        val riel0 = Stroke(0.35f * u)
+        val colorRiel = acento.copy(alpha = 0.45f)
+        val apagado = Color.White.copy(alpha = 0.06f)
+        val altaApagada = alta.copy(alpha = 0.16f)
+        // Colores del shift light leídos UNA vez (aquí, no por columna y por cuadro); si cambian, este bloque se rehace
+        val baja = Paleta.rpmBaja
+        val media = Paleta.rpmMedia
+        val altaZ = Paleta.rpmAlta
+        val rpmCol = IntArray(g.n) { i -> ((i + 0.5f) / g.n * RPM_MAX).toInt() }
+        onDrawBehind {
+            val r = rS.value
+            val shift = r.shift
+            val enRojo = r.rpm >= shift
+            val alfa = if (enRojo) alfaS.value else 1f
+            val rpmAguja = agujaS.value
+            val encendidas = if (rpmAguja > 1f) ((rpmAguja / RPM_MAX) * g.n).toInt().coerceIn(0, g.n) else 0
+            if (diagonal) drawPath(riel, colorRiel, style = riel0)
+            for (i in 0 until g.n) {
+                val rpmBarra = rpmCol[i]
+                val prendida = i < encendidas
+                val zona = when { rpmBarra >= shift * 0.9f -> altaZ; rpmBarra >= shift * 0.65f -> media; else -> baja }
+                if (prendida) {
+                    if (neon) drawPath(columnas[i], zona, alpha = 0.28f * alfa, style = halo)
+                    drawPath(columnas[i], zona, alpha = alfa)
+                } else drawPath(columnas[i], if (rpmBarra >= shift) altaApagada else apagado)
+            }
+        }
+    })
 }

@@ -18,6 +18,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -61,6 +62,16 @@ class ServicioMoto : Service() {
             return START_NOT_STICKY
         }
         if (!enPrimerPlano) return START_NOT_STICKY
+        // intent == null: Android revivió el servicio tras un cierre inesperado de la app (START_STICKY). El proceso
+        // vuelve solo, pero la pantalla del tablero no: si estás en la moto, se trae al frente (v3.8, probado
+        // matando el proceso: sin esto se quedaba la pantalla de bloqueo).
+        if (intent == null) scope.launch {
+            delay(5_000)                                   // Energia confirma "en la moto" a los ~2.5 s
+            if (Energia.enMoto.value && !Lanzador.actividadVisible) {
+                android.util.Log.i("FT150-EN", "recuperación: la app se cerró sola, traigo el tablero al frente")
+                Energia.traerAlFrente(this@ServicioMoto)
+            }
+        }
         // Con la app en pantalla Android sí deja agregar "ubicación": si el servicio arrancó solo desde segundo plano
         // (reinicio de Android) se quedó sin ella y el GPS se callaba con la pantalla apagada
         if (BleManager.primerPlano) ponerEnPrimerPlano(textoActual)

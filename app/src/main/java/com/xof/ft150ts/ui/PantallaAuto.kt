@@ -66,6 +66,7 @@ import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -78,6 +79,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -91,9 +93,12 @@ import com.xof.ft150ts.AudioSalida
 import com.xof.ft150ts.Bache
 import com.xof.ft150ts.Baches
 import com.xof.ft150ts.Brujula
+import com.xof.ft150ts.CarPlay
+import com.xof.ft150ts.CarPlayPestana
 import com.xof.ft150ts.ClimaManager
 import com.xof.ft150ts.ComandosVoz
 import com.xof.ft150ts.Estacionamiento
+import com.xof.ft150ts.EstadoCarPlay
 import com.xof.ft150ts.EstiloMapa
 import com.xof.ft150ts.GiroPid
 import com.xof.ft150ts.IphoneMusica
@@ -104,7 +109,9 @@ import com.xof.ft150ts.Luz
 import com.xof.ft150ts.Mapas
 import com.xof.ft150ts.Moto
 import com.xof.ft150ts.Musica
+import com.xof.ft150ts.ModoCarPlay
 import com.xof.ft150ts.MusicaManager
+import com.xof.ft150ts.ProtocoloCarPlay
 import com.xof.ft150ts.Root
 import com.xof.ft150ts.UbicacionManager
 import com.xof.ft150ts.duracionCorta
@@ -141,6 +148,7 @@ fun PantallaAuto(onAccesoNotif: () -> Unit) {
                     Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(10.dp),
                 ) {
+                    TarjetaRutina()
                     MiniTablero(Modifier.fillMaxWidth())
                     TarjetaMusica(Modifier.fillMaxWidth(), onAccesoNotif)
                 }
@@ -153,6 +161,7 @@ fun PantallaAuto(onAccesoNotif: () -> Unit) {
                 verticalArrangement = Arrangement.spacedBy(10.dp),
             ) {
                 MapaMoto(Modifier.fillMaxWidth().height(altoMapa))
+                TarjetaRutina()
                 MiniTablero(Modifier.fillMaxWidth())
                 TarjetaMusica(Modifier.fillMaxWidth(), onAccesoNotif)
             }
@@ -178,6 +187,42 @@ private fun MapaMoto(modifier: Modifier) {
     var pedirDestino by remember { mutableStateOf(false) }
     var verMoto by remember { mutableStateOf(false) }
     var seguir by remember { mutableStateOf(true) }
+
+    // CarPlay (DiPlay): con sesión en vivo el mapa de CarPlay toma el lugar de OSM; sin sesión, OSM de siempre
+    val carplayOn by CarPlay.enMapa.collectAsStateWithLifecycle()
+    val confiadas by CarPlay.firmasConfiables.collectAsStateWithLifecycle()
+    // Se vuelve a buscar al ver la página (pudiste instalar o actualizar DiPlay mientras), fuera del hilo de la
+    // pantalla. Mientras busca se queda el resultado anterior (sin parpadeos); la primera vez, "conectando".
+    var busqueda by remember { mutableStateOf<BusquedaDiPlay?>(null) }
+    LaunchedEffect(carplayOn, confiadas, visible) {
+        if (carplayOn && visible) busqueda = buscarDiPlay(ctx)
+    }
+    val diplay = busqueda?.info
+    val cpModo by CarPlay.modo.collectAsStateWithLifecycle()
+    val cpAbrirSolo by CarPlay.abrirSolo.collectAsStateWithLifecycle()
+    val cpFijo: EstadoCarPlay? = when {
+        !carplayOn -> null
+        busqueda == null -> EstadoCarPlay.Conectando
+        diplay == null -> EstadoCarPlay.SinDiPlay
+        !diplay.confiable -> EstadoCarPlay.FirmaDesconocida
+        // Ventana / Dividida / Completa: la pantalla de CarPlay de DiPlay (no hace falta el servicio del mapa)
+        cpModo != ModoCarPlay.MAPA -> EstadoCarPlay.Listo
+        !CarPlay.incrustarPosible -> EstadoCarPlay.SinSoporte
+        diplay.servicio == null -> EstadoCarPlay.SinServicio
+        else -> null
+    }
+    // Pedir el mapa solo en modo Mapa y con la página en pantalla: oculta, DiPlay apaga ese decodificador
+    val cpEnlazar = carplayOn && cpFijo == null && visible
+    var cpEstado by remember { mutableStateOf<EstadoCarPlay>(EstadoCarPlay.Conectando) }
+    LaunchedEffect(cpEnlazar) { if (!cpEnlazar) cpEstado = EstadoCarPlay.Conectando }
+    val cpMostrado = cpFijo ?: cpEstado
+    val cpVivo = cpEnlazar && ProtocoloCarPlay.mostrarCarPlay(cpEstado)
+    // Con CarPlay ocupando la pestaña (modo Pestaña) el mapa OSM queda tapado: no se dibuja ni gira
+    val cpPestanaVisible by CarPlayPestana.visible.collectAsStateWithLifecycle()
+    // Para el horario nocturno: hay una sesión de CarPlay en uso (se marca cada minuto mientras se ve en vivo)
+    LaunchedEffect(cpVivo) {
+        while (cpVivo) { CarPlay.ultimoEnVivo.value = System.currentTimeMillis(); delay(60_000) }
+    }
 
     val acento = Paleta.lima
     val mapa = remember { crearMapa(ctx) }
@@ -268,8 +313,8 @@ private fun MapaMoto(modifier: Modifier) {
     val giro = remember { GiroPid() }
     val rumboFino = remember { mutableFloatStateOf(-1f) }     // hacia dónde vas (flecha de la brújula)
     val giroMapa = remember { mutableFloatStateOf(0f) }       // cuánto está girado el mapa en la pantalla
-    LaunchedEffect(visible, rumbo, seguir) {
-        if (!visible) return@LaunchedEffect
+    LaunchedEffect(visible && !cpVivo && !cpPestanaVisible, rumbo, seguir) {
+        if (!visible || cpVivo || cpPestanaVisible) return@LaunchedEffect
         var usarGps = false
         var tAnt = 0L
         var aplicado = Float.NaN
@@ -303,10 +348,11 @@ private fun MapaMoto(modifier: Modifier) {
             }
         }
     }
-    // Fluidez: con la página oculta el mapa no se dibuja (osmdroid dibujaría fuera de la pantalla)
-    LaunchedEffect(visible) {
-        mapa.visibility = if (visible) android.view.View.VISIBLE else android.view.View.INVISIBLE
-        if (visible) { mapa.onResume(); mapa.invalidate() } else mapa.onPause()
+    // Fluidez: con la página oculta (o con CarPlay en vivo encima) el mapa OSM no se dibuja
+    val dibujarOsm = visible && !cpVivo && !cpPestanaVisible
+    LaunchedEffect(dibujarOsm) {
+        mapa.visibility = if (dibujarOsm) android.view.View.VISIBLE else android.view.View.INVISIBLE
+        if (dibujarOsm) { mapa.onResume(); mapa.invalidate() } else mapa.onPause()
     }
     LaunchedEffect(recorrido) {
         linea.setPoints(recorrido)
@@ -356,8 +402,29 @@ private fun MapaMoto(modifier: Modifier) {
 
     // Lugar del mapa en la pantalla (ahí se pone la ventana de la manzanita)
     var rectMapa by remember { mutableStateOf<android.graphics.Rect?>(null) }
+    // Ventana / Dividida: abrir CarPlay solo al entrar a la página (una vez por visita, y no más de una vez por minuto:
+    // así cambiar de página o recomponer no lo abre en ciclo). En Completa nunca: taparía FT150TS y volvería a abrirse.
+    val cpVentanaIgnorada by CarPlay.ventanaIgnorada.collectAsStateWithLifecycle()
+    // Si FT150TS es la pantalla de inicio, Android no la deja en pantalla dividida (CarPlay saldría completo)
+    val soyInicio = remember(visible) { Lanzador.esInicioPredeterminado(ctx) }
+    val listoParaAbrir = carplayOn && cpAbrirSolo && visible && cpFijo == EstadoCarPlay.Listo && rectMapa != null &&
+        // Si Android ya abrió la "ventana" en pantalla completa, no se repite sola (taparía FT150TS cada vez)
+        ((cpModo == ModoCarPlay.VENTANA && (!cpVentanaIgnorada || CarPlay.rootListo())) ||
+            (cpModo == ModoCarPlay.DIVIDIDA && !soyInicio))
+    LaunchedEffect(listoParaAbrir) {
+        if (!listoParaAbrir) return@LaunchedEffect
+        delay(700)                                            // que el mapa termine de acomodarse
+        val ahora = SystemClock.elapsedRealtime()
+        if (ahora - CarPlay.ultimaApertura < 60_000L) return@LaunchedEffect
+        CarPlay.ultimaApertura = ahora
+        abrirSegunModo(ctx, cpModo, rectMapa)?.let { Toast.makeText(ctx, it, Toast.LENGTH_LONG).show() }
+    }
+    Column(modifier.panel()) {
+    // Franja de CarPlay arriba, fuera de la superficie: lo que se toca sobre el mapa de CarPlay lo recibe DiPlay
+    if (carplayOn) BarraCarPlay(cpMostrado, rectMapa)
     Box(
-        modifier.panel().onGloballyPositioned { c ->
+        // clipToBounds: con "rumbo arriba" osmdroid gira el lienzo y pintaría fuera de su caja (encima de la franja)
+        Modifier.weight(1f).fillMaxWidth().clipToBounds().onGloballyPositioned { c ->
             val b = c.boundsInWindow()
             val m = 8
             rectMapa = android.graphics.Rect(b.left.toInt() + m, b.top.toInt() + m, b.right.toInt() - m, b.bottom.toInt() - m)
@@ -365,6 +432,17 @@ private fun MapaMoto(modifier: Modifier) {
     ) {
         AndroidView(factory = { mapa }, modifier = Modifier.fillMaxSize())
 
+        // Mapa en vivo de CarPlay, dibujado por DiPlay. Sin sesión se queda en 1 dp (sigue pegado para enterarse
+        // cuando el iPhone empiece a mandar el mapa) y se ve OSM; con sesión ocupa todo el mapa.
+        if (cpEnlazar && diplay != null && diplay.servicio != null &&
+            android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R) {
+            SuperficieCarPlay(
+                diplay, cpEstado, { ev -> cpEstado = ProtocoloCarPlay.reducir(cpEstado, ev) },
+                if (cpVivo) Modifier.fillMaxSize() else Modifier.size(1.dp).align(Alignment.BottomEnd),
+            )
+        }
+
+        if (!cpVivo) {
         // Capa invisible encima del mapa: así el mapa no "se roba" el deslizar
         // entre pantallas. El mapa siempre te sigue; usa + y − para el zoom.
         Box(
@@ -393,8 +471,11 @@ private fun MapaMoto(modifier: Modifier) {
         ) {
             ChipClima()
             ChipGps()
-            BotonRedondo("P", { verMoto = true })
-            BotonMicrofono()
+            // Lado a lado: en vertical la columna chocaba con el cuadro de velocidad de abajo
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                BotonRedondo("P", { verMoto = true })
+                BotonMicrofono()
+            }
         }
 
         NombreCalle(Modifier.align(Alignment.TopCenter).padding(top = 12.dp))
@@ -408,6 +489,7 @@ private fun MapaMoto(modifier: Modifier) {
             // Brújula: la "N" marca el norte y la flecha hacia dónde vas; tócala para girar el mapa con tu rumbo
             BotonBrujula({ rumboFino.floatValue }, { giroMapa.floatValue }, rumbo) { Moto.ponerRumboArriba(!rumbo) }
             BotonManzana(rectMapa)
+            if (!carplayOn) BotonRedondo("CP", { CarPlay.ponerEnMapa(ctx, true) })
         }
 
         Row(
@@ -431,6 +513,8 @@ private fun MapaMoto(modifier: Modifier) {
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 3.dp)
                 .background(Paleta.fondo.copy(alpha = 0.7f)).padding(horizontal = 5.dp, vertical = 1.dp),
         )
+        }
+    }
     }
 
     if (pedirDestino) {

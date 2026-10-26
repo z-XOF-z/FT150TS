@@ -5,11 +5,25 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
 
-enum class TemaApp { CARBONO, VIDRIO, FILO, PIXEL, TACTICO, HOLO, ACIDO, CIRCUITO, VERTICE }
-enum class EstiloTablero { LCD, CLASICO }
+enum class TemaApp {
+    CARBONO, VIDRIO, FILO, PIXEL, TACTICO, HOLO, ACIDO, CIRCUITO, VERTICE, TINTA,
+    // v3.4: estilos (recetas de Estilos.kt que dibuja ui/MotorEstilos.kt)
+    AURORA, BLOQUE, ARCILLA, CYBER, SYNTH, SUIZO, BENTO, NOCHE_ROJA, ORGANICO, MEMPHIS, DECO, PISTA, MEZCLA,
+    // v3.10: el morado del tablero Racing en toda la app
+    RACING,
+}
+/** Diseño del tablero (independiente del tema). v3.5: Pista, Minimal, Telemetría y Bento. */
+enum class EstiloTablero { LCD, RACE, VFD, ANILLO, CLASICO, PISTA, MINIMAL, TELEMETRIA, BENTO, SUPERBIKE, F1, ARRANCON, RALLY, ARCADE, UNIVERSAL,
+    // v3.10: recreación fiel del concepto morado de Andrew ("145 · 3 GEAR")
+    MORADO,
+    // v3.10: concepto de telemetría morada ("168 · 5")
+    TELEMETRIA_MORADA,
+    // v3.10: concepto dual neón cian y rojo ("0 · N", PRCXE / LAUNCH)
+    DUAL_NEON }
 /** Cuándo se queda prendida la pantalla del teléfono. */
 enum class PantallaEncendida { SIEMPRE, CON_MOTO, NORMAL }
 /** Barras de Android dentro de la app: normales, sin los botones de abajo, o pantalla completa. */
@@ -97,8 +111,14 @@ object Apariencia {
     /** Modo XOF desbloqueado (secreto del logo). */
     var secretoXof by mutableStateOf(false)
         private set
-    /** Animación al entrar al tablero (barrido a 45° y las RPM suben al tope y regresan). */
+    /** Animación al abrir el switch (sale en el tablero; las RPM suben al tope y regresan). */
     var animEntrada by mutableStateOf(true)
+        private set
+    /** Cuál animación de switch: índice de TIPOS_ARRANQUE (el último = una al azar cada vez). */
+    var tipoArranque by mutableIntStateOf(0)
+        private set
+    /** Pantalla de inicio al abrir la app (v3.10): 0 clásica, 1-3 neón, 4 al azar. Ver INICIOS. */
+    var estiloInicio by mutableIntStateOf(1)
         private set
     /** Brillo neón en bordes, barra de RPM y barra de arriba. */
     var neon by mutableStateOf(false)
@@ -117,9 +137,35 @@ object Apariencia {
     /** Medidor de fluidez en pantalla (cuadros por segundo y % de tirones, medidos por Android). */
     var medidorFluidez by mutableStateOf(false)
         private set
+    /** Estilos: usar el color propio del tema (si no, el acento elegido abajo). */
+    var acentoDelTema by mutableStateOf(true)
+        private set
+    /** v3.10: los tableros de los conceptos (Racing Morado, Telemetría Morada, Dual Neón) toman el color de acento. */
+    var tablerosConAcento by mutableStateOf(false)
+        private set
+    /** Semilla del tema Mezcla (cada número es un tema distinto). */
+    var semillaMezcla by mutableLongStateOf(150L)
+        private set
 
-    /** Color de acento actual (de la lista o el personalizado). */
+    /** La receta del tema actual si es un estilo (Aurora, Synth, Mezcla…); null en los temas de siempre. */
+    fun estiloActual(): EstiloTema? {
+        // Se lee en cada cuadro (colores, formas): solo se recalcula si cambió el tema o la semilla
+        val t = tema
+        val s = semillaMezcla
+        if (t != cacheTema || s != cacheSemilla) {
+            cacheEstilo = if (t == TemaApp.MEZCLA) Estilos.mezcla(s) else Estilos.porId(t.name)
+            cacheTema = t
+            cacheSemilla = s
+        }
+        return cacheEstilo
+    }
+    private var cacheTema: TemaApp? = null
+    private var cacheSemilla = Long.MIN_VALUE
+    private var cacheEstilo: EstiloTema? = null
+
+    /** Color de acento actual (el del estilo, de la lista o el personalizado). */
     fun colorAcento(): Long = when {
+        acentoDelTema && estiloActual() != null -> estiloActual()!!.acento
         acento == ACENTO_ORO -> ORO_XOF
         acento >= ACENTOS.size -> hsv(tonoLibre, saturacionLibre, 1f)
         else -> ACENTOS[acento].argb
@@ -159,7 +205,7 @@ object Apariencia {
             p.edit().putInt("acento", guardado).putInt("versionAcentos", 3).apply()
         }
         acento = guardado.coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size)
-        estiloTablero = if (p.getString("tablero", "LCD") == "CLASICO") EstiloTablero.CLASICO else EstiloTablero.LCD
+        estiloTablero = EstiloTablero.entries.firstOrNull { it.name == p.getString("tablero", "LCD") } ?: EstiloTablero.LCD
         coloresRpm = p.getInt("coloresRpm", 0).coerceIn(0, COLORES_RPM.size - 1)
         siempreHorizontal = p.getBoolean("horizontal", false)
         brilloMax = p.getBoolean("brilloMax", false)
@@ -174,11 +220,16 @@ object Apariencia {
         subirAccesosMm = p.getInt("subirAccesosMm", 5).coerceIn(0, 20)
         neon = p.getBoolean("neon", false)
         animEntrada = p.getBoolean("animEntrada", true)
+        tipoArranque = p.getInt("tipoArranque", 0).coerceIn(0, TIPOS_ARRANQUE.size - 1)
+        estiloInicio = p.getInt("estiloInicio", 1).coerceIn(0, INICIOS.size - 1)
         fondo = p.getInt("fondo", 0).coerceIn(0, 3)
         barraRpm = p.getInt("barraRpm", 0).coerceIn(0, 2)
         tonoLibre = p.getFloat("tonoLibre", 140f)
         saturacionLibre = p.getFloat("saturacionLibre", 1f)
         medidorFluidez = p.getBoolean("medidorFluidez", false)
+        acentoDelTema = p.getBoolean("acentoDelTema", true)
+        tablerosConAcento = p.getBoolean("tablerosConAcento", false)
+        semillaMezcla = p.getLong("semillaMezcla", 150L)
     }
 
     private fun guardar() {
@@ -200,16 +251,25 @@ object Apariencia {
             ?.putInt("subirAccesosMm", subirAccesosMm)
             ?.putBoolean("neon", neon)
             ?.putBoolean("animEntrada", animEntrada)
+            ?.putInt("tipoArranque", tipoArranque)
+            ?.putInt("estiloInicio", estiloInicio)
             ?.putBoolean("secretoXof", secretoXof)
             ?.putInt("fondo", fondo)
             ?.putInt("barraRpm", barraRpm)
             ?.putFloat("tonoLibre", tonoLibre)
             ?.putFloat("saturacionLibre", saturacionLibre)
             ?.putBoolean("medidorFluidez", medidorFluidez)
+            ?.putBoolean("acentoDelTema", acentoDelTema)
+            ?.putBoolean("tablerosConAcento", tablerosConAcento)
+            ?.putLong("semillaMezcla", semillaMezcla)
             ?.apply()
     }
 
     fun ponerMedidorFluidez(on: Boolean) { medidorFluidez = on; guardar() }
+    fun ponerAcentoDelTema(on: Boolean) { acentoDelTema = on; guardar() }
+    fun ponerTablerosConAcento(on: Boolean) { tablerosConAcento = on; guardar() }
+    /** Otra mezcla: una semilla nueva (y el tema pasa a Mezcla). */
+    fun otraMezcla() { semillaMezcla = System.nanoTime() and 0x7FFFFFFF; tema = TemaApp.MEZCLA; guardar() }
 
     fun ponerTema(t: TemaApp) { tema = t; guardar() }
     fun ponerAcento(i: Int) { acento = i.coerceIn(0, if (secretoXof) ACENTO_ORO else ACENTOS.size); guardar() }
@@ -218,9 +278,13 @@ object Apariencia {
     fun ponerAcentoLibre(tono: Float, sat: Float) { tonoLibre = tono; saturacionLibre = sat.coerceIn(0f, 1f); acento = ACENTOS.size; guardar() }
     fun ponerNeon(on: Boolean) { neon = on; guardar() }
     fun ponerAnimEntrada(on: Boolean) { animEntrada = on; guardar() }
+    fun ponerTipoArranque(i: Int) { tipoArranque = i.coerceIn(0, TIPOS_ARRANQUE.size - 1); guardar() }
+    fun ponerEstiloInicio(i: Int) { estiloInicio = i.coerceIn(0, INICIOS.size - 1); guardar() }
     fun ponerFondo(i: Int) { fondo = i.coerceIn(0, 3); guardar() }
     fun ponerBarraRpm(i: Int) { barraRpm = i.coerceIn(0, 2); guardar() }
     fun ponerEstiloTablero(e: EstiloTablero) { estiloTablero = e; guardar() }
+    /** Pasa al siguiente diseño de tablero (mantener presionado el tablero). */
+    fun siguienteTablero() { ponerEstiloTablero(EstiloTablero.entries[(estiloTablero.ordinal + 1) % EstiloTablero.entries.size]) }
     fun ponerColoresRpm(i: Int) { coloresRpm = i.coerceIn(0, COLORES_RPM.size - 1); guardar() }
     fun ponerSiempreHorizontal(on: Boolean) { siempreHorizontal = on; guardar() }
     fun ponerBrilloMax(on: Boolean) { brilloMax = on; guardar() }
@@ -242,3 +306,8 @@ object Apariencia {
         guardar()
     }
 }
+
+/** Animaciones al abrir el switch (Ajustes > Apariencia). La última elige una al azar cada vez. */
+/** Pantallas de inicio (v3.10). */
+val INICIOS = listOf("Clásica", "Potencia", "Ride mode", "Sistema", "Al azar")
+val TIPOS_ARRANQUE = listOf("Barrido 45°", "CRT", "Escáner", "Pulso", "Píxeles", "Al azar")

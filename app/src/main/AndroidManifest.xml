@@ -39,6 +39,18 @@
     <uses-permission android:name="android.permission.HIGH_SAMPLING_RATE_SENSORS" />
     <!-- Pedir que Android no la duerma por ahorro de batería -->
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- Ahorro nocturno: entrar y salir a la hora exacta, recalcular al arrancar el teléfono y pausar la
+         sincronización automática de cuentas (se regresa como estaba) -->
+    <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" />
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+    <uses-permission android:name="android.permission.READ_SYNC_SETTINGS" />
+    <uses-permission android:name="android.permission.WRITE_SYNC_SETTINGS" />
+    <!-- Actualizarse sola (Ajustes → Acerca de): instalar la versión nueva encima. Android siempre pide confirmar -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <!-- SOS por caída (opcional, apagado de fábrica): mandar tu ubicación por SMS a tu contacto de emergencia.
+         Sin este permiso se abre tu app de mensajes ya escrita -->
+    <uses-permission android:name="android.permission.SEND_SMS" />
+    <uses-feature android:name="android.hardware.telephony" android:required="false" />
 
     <!-- Para ver las apps de música, la voz y el dictado -->
     <queries>
@@ -57,6 +69,12 @@
         <intent>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
+        </intent>
+        <!-- CarPlay: DiPlay (receptor de CarPlay) y su servicio del mapa en vivo -->
+        <package android:name="com.shihab.diplay" />
+        <package android:name="com.shihab.diplay.hudtest" />
+        <intent>
+            <action android:name="com.shihab.diplay.action.EMBED_MAP" />
         </intent>
         <!-- Selector de salida de audio del sistema -->
         <package android:name="com.android.systemui" />
@@ -122,6 +140,29 @@
             android:name=".ServicioMoto"
             android:exported="false"
             android:foregroundServiceType="connectedDevice|location" />
+
+        <!-- Ahorro nocturno: su alarma y los eventos del sistema que obligan a recalcular el horario.
+             No exportado: solo Android (o esta app) le puede mandar algo -->
+        <!-- Sonoridad +: los reproductores avisan "abrí / cerré mi sesión de audio" (el mismo aviso que usan los
+             ecualizadores). Solo se lee el número de sesión. -->
+        <receiver
+            android:name=".ReceptorSesionAudio"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.media.action.OPEN_AUDIO_EFFECT_CONTROL_SESSION" />
+                <action android:name="android.media.action.CLOSE_AUDIO_EFFECT_CONTROL_SESSION" />
+            </intent-filter>
+        </receiver>
+        <receiver
+            android:name=".NocturnoReceiver"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Para compartir la ruta exportada (GPX) -->
         <provider

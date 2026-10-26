@@ -23,6 +23,7 @@ import kotlinx.coroutines.launch
 /** Páginas a las que se puede saltar desde fuera de la pantalla (modo moto, botón Inicio). */
 const val PAGINA_APPS = 0
 const val PAGINA_TABLERO = 1
+const val PAGINA_MOTO = 3
 
 /**
  * Modo moto: sabe si el teléfono está montado en la moto.
@@ -41,6 +42,11 @@ object Energia {
     val cargando = MutableStateFlow(false)
     /** Resultado: el teléfono está en la moto (con el switch prendido). */
     val enMoto = MutableStateFlow(false)
+    /**
+     * Se cortó la carga pero vas rodando: no apagaste la moto, se aflojó el cable (o falló el cargador). El tablero se
+     * queda y avisa; sale hasta que te detienes.
+     */
+    val cableSuelto = MutableStateFlow(false)
 
     // Opciones (Ajustes > Modo moto)
     val detectarCarga = MutableStateFlow(true)    // usar la carga para saber si está en la moto
@@ -108,6 +114,7 @@ object Energia {
                 // La etiqueta NFC del soporte cuenta sola (aunque no esté cargando). Dormida (modo sueño) no cuenta nada.
                 SenalMoto(detectar || nfc, !dormido && ((detectar && carga && (!ble || motoBle)) || nfc), carga && detectar, dormido)
             }.distinctUntilChanged().collectLatest { s ->
+                android.util.Log.i("FT150-EN", "señal $s · enMoto=${enMoto.value}")
                 when {
                     !s.detectar -> ponerEnMoto(false)
                     s.listo -> {
@@ -118,20 +125,46 @@ object Energia {
                         // Corte corto al dar marcha: no cuenta. Si sigue cargando y solo se perdió
                         // el Bluetooth (la tarjeta se reinició), espera más. Al dormirse, de inmediato.
                         delay(if (s.dormido) 0 else if (s.carga) 20_000 else 8_000)
-                        ponerEnMoto(false)
+                        // Sin carga pero rodando: el tablero NO se va a tus apps a media calle
+                        if (!s.dormido && !s.carga) esperarAQueTeDetengas()
+                        ponerEnMoto(false, apagoSwitch = !s.dormido && !s.carga)
                     }
                 }
             }
         }
     }
 
-    private fun ponerEnMoto(v: Boolean) {
+    /**
+     * La carga se cortó: si vas rodando (GPS > [VEL_RODANDO] km/h) no fue el switch. Avisa una vez y espera a que
+     * estés detenido 20 s seguidos (o a que vuelva la carga: entonces esto se cancela solo).
+     */
+    private suspend fun esperarAQueTeDetengas() {
+        if (UbicacionManager.velocidadKmh() < VEL_RODANDO) return
+        cableSuelto.value = true
+        Voz.decir("Ojo: el teléfono dejó de cargar. Revisa el cable.")
+        try {
+            var quieto = 0
+            while (quieto < 20) {
+                delay(1_000)
+                quieto = if (UbicacionManager.velocidadKmh() < 3f) quieto + 1 else 0
+            }
+        } finally {
+            cableSuelto.value = false
+        }
+    }
+
+    private const val VEL_RODANDO = 8f
+
+    private fun ponerEnMoto(v: Boolean, apagoSwitch: Boolean = false) {
         if (enMoto.value == v) return
+        android.util.Log.i("FT150-EN", "modo moto: $v (apagó switch: $apagoSwitch)")
         enMoto.value = v
+        if (v) Encendido.alPrender() else if (apagoSwitch) Encendido.alApagar()
         val ctx = appCtx ?: return
         if (v) {
             // Abriste el switch con la pantalla apagada (o en otra app): al verla, sale la animación FT150
             if (!Lanzador.enPantalla.value) Lanzador.inicioPendiente.value = true
+            Lanzador.pedirArranque()                 // la animación del tablero sale solo al abrir el switch
             Lanzador.irA(PAGINA_TABLERO)
             if (abrirAlMontar.value && !BleManager.primerPlano) traerAlFrente(ctx)
         } else if (alQuitarApps.value && !ModoSueno.dormido.value) {

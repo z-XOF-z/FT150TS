@@ -32,7 +32,7 @@ object Luz {
         val app = c.applicationContext
         ctx = app
         usar.value = app.getSharedPreferences("luz", Context.MODE_PRIVATE).getBoolean("usar", true)
-        sm = app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(app)
         hay.value = sm?.getDefaultSensor(Sensor.TYPE_LIGHT) != null
     }
 

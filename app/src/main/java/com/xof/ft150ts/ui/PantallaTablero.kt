@@ -1,6 +1,20 @@
 package com.xof.ft150ts.ui
 
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.scaleIn
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.border
+import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.layout.Box
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.input.pointer.pointerInput
+import kotlinx.coroutines.delay
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -26,6 +40,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -60,7 +76,43 @@ fun PantallaTablero() {
     // Al entrar: barrido a 45° y las RPM suben al tope y regresan (ver Arranque.kt)
     val arranque = rememberArranque()
     CompositionLocalProvider(LocalArranque provides arranque) {
-        if (Apariencia.estiloTablero == EstiloTablero.LCD) TableroEstiloLcd() else TableroClasico()
+        // Mantener presionado el tablero cambia al siguiente diseño (el tema no cambia); un aviso dice cuál quedó
+        var aviso by remember { mutableStateOf<String?>(null) }
+        LaunchedEffect(aviso) { if (aviso != null) { delay(1400); aviso = null } }
+        Box(Modifier.fillMaxSize().pointerInput(Unit) {
+            detectTapGestures(onLongPress = {
+                Apariencia.siguienteTablero()
+                aviso = NOMBRES_TABLERO[Apariencia.estiloTablero]
+            })
+        }) {
+            AnimatedContent(Apariencia.estiloTablero, label = "tablero",
+                transitionSpec = { fadeIn(tween(260)) togetherWith fadeOut(tween(160)) }) { estilo ->
+                when (estilo) {
+                    EstiloTablero.LCD -> TableroEstiloLcd()
+                    EstiloTablero.RACE -> TableroEstiloLcd { TableroRaceLcd(it) }
+                    EstiloTablero.VFD -> TableroEstiloLcd { TableroVfd(it) }
+                    EstiloTablero.ANILLO -> TableroEstiloLcd { TableroAnillo(it) }
+                    EstiloTablero.CLASICO -> TableroClasico()
+                    EstiloTablero.PISTA -> TableroPista()
+                    EstiloTablero.MINIMAL -> TableroMinimal()
+                    EstiloTablero.TELEMETRIA -> TableroTelemetria()
+                    EstiloTablero.BENTO -> TableroBento()
+                    EstiloTablero.SUPERBIKE -> TableroSuperbike()
+                    EstiloTablero.F1 -> TableroF1()
+                    EstiloTablero.ARRANCON -> TableroArrancon()
+                    EstiloTablero.RALLY -> TableroRally()
+                    EstiloTablero.ARCADE -> TableroArcade()
+                    EstiloTablero.UNIVERSAL -> TableroUniversal()
+                    EstiloTablero.MORADO -> TableroMorado()
+                    EstiloTablero.TELEMETRIA_MORADA -> TableroTelemetriaMorada()
+                    EstiloTablero.DUAL_NEON -> TableroDualNeon()
+                }
+            }
+            AnimatedVisibility(aviso != null, Modifier.align(Alignment.Center), enter = fadeIn() + scaleIn(initialScale = 0.9f), exit = fadeOut()) {
+                Text("Tablero · ${aviso ?: ""}", color = Paleta.texto, fontSize = 20.sp, fontWeight = FontWeight.Bold,
+                    modifier = Modifier.panel(Formas.chica).padding(horizontal = 20.dp, vertical = 12.dp))
+            }
+        }
     }
 }
 
@@ -68,7 +120,7 @@ fun PantallaTablero() {
 // Estilo LCD Sport
 // ------------------------------------------------------------
 @Composable
-private fun TableroEstiloLcd() {
+private fun TableroEstiloLcd(cuadro: @Composable (Modifier) -> Unit = { TableroLcd(it) }) {
     val accesos by Lanzador.mostrarAccesos.collectAsStateWithLifecycle()
     val compacto = Apariencia.datosCompactos
     BoxWithConstraints(Modifier.fillMaxSize().barrido45(LocalArranque.current, Paleta.lima).padding(horizontal = 10.dp, vertical = 8.dp)) {
@@ -89,14 +141,16 @@ private fun TableroEstiloLcd() {
                     verticalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterVertically),
                 ) {
                     ShiftEnVivo(Modifier.fillMaxWidth())
-                    TableroLcd(Modifier.fillMaxWidth())
+                    cuadro(Modifier.fillMaxWidth())
                 }
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    // Rendimiento: en caché de GPU; la pantalla no la vuelve a pintar con cada paso de la aguja
+                    Modifier.weight(1f).fillMaxHeight().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(if (compacto) 7.dp else 10.dp),
                 ) {
                     AlertaEnVivo()
                     AlertaClimaTablero()
+                    TarjetaRutina()
                     Testigos()
                     DatosExtra(compacto)
                     TarjetaClima(compacta = compacto)
@@ -110,8 +164,9 @@ private fun TableroEstiloLcd() {
             ) {
                 AlertaEnVivo()
                 AlertaClimaTablero()
+                TarjetaRutina()
                 ShiftEnVivo(Modifier.fillMaxWidth())
-                TableroLcd(Modifier.fillMaxWidth())
+                cuadro(Modifier.fillMaxWidth())
                 if (accesos) AccesosDirectos(vertical = false)
                 Testigos()
                 DatosExtra(compacto)
@@ -136,7 +191,12 @@ private fun AlertaEnVivo() {
     val e by Moto.estado.enVivo()
     val exceso by Moto.excesoVel.enVivo()
     val limite by Moto.limiteActivo.collectAsStateWithLifecycle()
-    BannerAlerta(if (exceso) "Vas a más de $limite km/h" else e.alerta)
+    val cable by com.xof.ft150ts.Energia.cableSuelto.collectAsStateWithLifecycle()
+    BannerAlerta(when {
+        exceso -> "Vas a más de $limite km/h"
+        cable -> "Sin carga: revisa el cable del teléfono"
+        else -> e.alerta
+    })
 }
 
 /** Testigos pixelados: neutral, Bluetooth, GPS, alerta, corte, motor, demo. */
@@ -259,11 +319,12 @@ private fun TableroClasico() {
                     MedidorEnVivo(Modifier.fillMaxWidth())
                 }
                 Column(
-                    Modifier.weight(1f).fillMaxHeight().verticalScroll(rememberScrollState()),
+                    Modifier.weight(1f).fillMaxHeight().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).verticalScroll(rememberScrollState()),
                     verticalArrangement = Arrangement.spacedBy(if (compacto) 7.dp else 10.dp),
                 ) {
                     AlertaEnVivo()
                     AlertaClimaTablero()
+                    TarjetaRutina()
                     GrillaDatos(compacto)
                     TarjetaClima(compacta = compacto)
                     UltimaNotif()
@@ -277,6 +338,7 @@ private fun TableroClasico() {
             ) {
                 AlertaEnVivo()
                 AlertaClimaTablero()
+                TarjetaRutina()
                 ShiftEnVivo(Modifier.fillMaxWidth())
                 MedidorEnVivo(Modifier.fillMaxWidth().widthIn(max = 420.dp))
                 if (accesos) AccesosDirectos(vertical = false)

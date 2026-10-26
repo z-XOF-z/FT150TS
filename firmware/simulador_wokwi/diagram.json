@@ -1,0 +1,81 @@
+{
+  "version": 1,
+  "author": "FT150TS",
+  "editor": "wokwi",
+  "parts": [
+    { "type": "board-esp32-s3-devkitc-1", "id": "esp", "top": 0, "left": 0, "attrs": {} },
+    { "type": "wokwi-lcd2004", "id": "lcd", "top": -40, "left": 220, "attrs": { "pins": "i2c", "background": "blue", "color": "white" } },
+
+    { "type": "wokwi-pushbutton", "id": "btn_arriba", "top": 170, "left": 260, "attrs": { "color": "green", "label": "ARRIBA", "bounce": "0" } },
+    { "type": "wokwi-pushbutton", "id": "btn_abajo", "top": 170, "left": 340, "attrs": { "color": "red", "label": "ABAJO", "bounce": "0" } },
+    { "type": "wokwi-pushbutton", "id": "btn_ok", "top": 170, "left": 420, "attrs": { "color": "blue", "label": "OK", "bounce": "0" } },
+
+    { "type": "wokwi-potentiometer", "id": "pot_bat", "top": 250, "left": -260, "attrs": { "value": "0.75" } },
+    { "type": "wokwi-potentiometer", "id": "pot_gas", "top": 250, "left": -170, "attrs": { "value": "0.6" } },
+    { "type": "wokwi-potentiometer", "id": "pot_celda", "top": 250, "left": -80, "attrs": { "value": "0.8" } },
+    { "type": "wokwi-photoresistor-sensor", "id": "ldr", "top": 120, "left": -300, "attrs": {} },
+
+    { "type": "wokwi-ds18b20", "id": "temp", "top": -60, "left": -200, "attrs": { "temperature": "85" } },
+    { "type": "wokwi-resistor", "id": "r_temp", "top": -80, "left": -120, "attrs": { "value": "4700" } },
+
+    { "type": "wokwi-slide-switch", "id": "sw_llave", "top": 300, "left": 260, "attrs": { "value": "1" } },
+    { "type": "wokwi-slide-switch", "id": "sw_neutral", "top": 300, "left": 340, "attrs": { "value": "0" } },
+
+    { "type": "wokwi-relay-module", "id": "rele", "top": 360, "left": 120, "attrs": {} },
+    { "type": "wokwi-led-ring", "id": "leds", "top": 360, "left": -120, "attrs": { "pixels": "8" } },
+
+    { "type": "wokwi-text", "id": "t1", "top": 330, "left": -260, "attrs": { "text": "BAT 12V   GASOLINA   CELDA" } },
+    { "type": "wokwi-text", "id": "t2", "top": 350, "left": 255, "attrs": { "text": "LLAVE      NEUTRAL" } },
+    { "type": "wokwi-text", "id": "t3", "top": 470, "left": -120, "attrs": { "text": "SHIFT LIGHT" } },
+    { "type": "wokwi-text", "id": "t4", "top": 470, "left": 120, "attrs": { "text": "RELEVADOR (bloqueo)" } }
+  ],
+  "connections": [
+    [ "esp:TX", "$serialMonitor:RX", "", [] ],
+    [ "esp:RX", "$serialMonitor:TX", "", [] ],
+
+    [ "lcd:VCC", "esp:5V", "red", [] ],
+    [ "lcd:GND", "esp:GND.1", "black", [] ],
+    [ "lcd:SDA", "esp:8", "green", [] ],
+    [ "lcd:SCL", "esp:9", "blue", [] ],
+
+    [ "btn_arriba:1.l", "esp:6", "green", [] ],
+    [ "btn_arriba:2.l", "esp:GND.1", "black", [] ],
+    [ "btn_abajo:1.l", "esp:7", "green", [] ],
+    [ "btn_abajo:2.l", "esp:GND.1", "black", [] ],
+    [ "btn_ok:1.l", "esp:15", "green", [] ],
+    [ "btn_ok:2.l", "esp:GND.1", "black", [] ],
+
+    [ "pot_bat:SIG", "esp:1", "orange", [] ],
+    [ "pot_bat:VCC", "esp:3V3.1", "red", [] ],
+    [ "pot_bat:GND", "esp:GND.1", "black", [] ],
+    [ "pot_gas:SIG", "esp:2", "orange", [] ],
+    [ "pot_gas:VCC", "esp:3V3.1", "red", [] ],
+    [ "pot_gas:GND", "esp:GND.1", "black", [] ],
+    [ "pot_celda:SIG", "esp:4", "orange", [] ],
+    [ "pot_celda:VCC", "esp:3V3.1", "red", [] ],
+    [ "pot_celda:GND", "esp:GND.1", "black", [] ],
+    [ "ldr:AO", "esp:5", "orange", [] ],
+    [ "ldr:VCC", "esp:3V3.1", "red", [] ],
+    [ "ldr:GND", "esp:GND.1", "black", [] ],
+
+    [ "temp:DQ", "esp:14", "purple", [] ],
+    [ "temp:VCC", "esp:3V3.1", "red", [] ],
+    [ "temp:GND", "esp:GND.1", "black", [] ],
+    [ "r_temp:1", "esp:3V3.1", "red", [] ],
+    [ "r_temp:2", "esp:14", "purple", [] ],
+
+    [ "sw_llave:2", "esp:21", "yellow", [] ],
+    [ "sw_llave:1", "esp:GND.1", "black", [] ],
+    [ "sw_neutral:2", "esp:18", "yellow", [] ],
+    [ "sw_neutral:1", "esp:GND.1", "black", [] ],
+
+    [ "rele:IN", "esp:40", "magenta", [] ],
+    [ "rele:VCC", "esp:5V", "red", [] ],
+    [ "rele:GND", "esp:GND.1", "black", [] ],
+
+    [ "leds:DIN", "esp:39", "cyan", [] ],
+    [ "leds:VCC", "esp:5V", "red", [] ],
+    [ "leds:GND", "esp:GND.1", "black", [] ]
+  ],
+  "dependencies": {}
+}

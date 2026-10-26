@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.xof.ft150ts.sinbarra"
+    android:versionCode="3"
+    android:versionName="1.3">
+    <!-- Superposición de SystemUI (HyperOS 1): quita la barra de arriba (tres puntos) y la de abajo (píldora)
+         de las ventanas flotantes. No es estática: se puede apagar con "cmd overlay disable com.xof.ft150ts.sinbarra". -->
+    <overlay android:targetPackage="com.android.systemui" android:priority="900" />
+    <application android:hasCode="false" android:label="FT150TS sin barra" />
+</manifest>

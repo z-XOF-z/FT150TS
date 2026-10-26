@@ -30,6 +30,7 @@ import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.StrokeCap
 import androidx.compose.ui.graphics.compositeOver
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.graphics.vector.PathBuilder
 import androidx.compose.ui.graphics.vector.path
@@ -52,6 +53,8 @@ import java.util.Locale
 private val esVidrio: Boolean get() = Apariencia.tema == TemaApp.VIDRIO
 /** Tema Filo: HUD con cortes a 45° más bruscos y todo integrado en un marco. */
 val temaFilo: Boolean get() = Apariencia.tema == TemaApp.FILO
+/** v3.10: tema Racing Morado (los colores del tablero morado en toda la app). */
+val temaRacing: Boolean get() = Apariencia.tema == TemaApp.RACING
 /** Tema Pixel: los cortes a 45° hechos de escalones de pixel. */
 val temaPixel: Boolean get() = Apariencia.tema == TemaApp.PIXEL
 /** Tema Táctico: visor militar, esquinas con corchetes y retícula. */
@@ -68,7 +71,15 @@ val temaCircuito: Boolean get() = Apariencia.tema == TemaApp.CIRCUITO
  * tarjetas son "losas" sin contorno y una sola línea del acento une el riel con el contenido.
  */
 val temaVertice: Boolean get() = Apariencia.tema == TemaApp.VERTICE
+/**
+ * Tema Tinta: viñetas de cómic de moto. Tarjetas como cuadros de historieta (un poco inclinados), contorno de tinta
+ * grueso, sombra sólida del acento desplazada (como impresión fuera de registro), trama de puntos en una esquina y,
+ * de fondo, líneas de velocidad que salen de un punto de fuga. Todo se dibuja una vez por tamaño.
+ */
+val temaTinta: Boolean get() = Apariencia.tema == TemaApp.TINTA
 /** Temas con la barra de arriba integrada (segmentos) y marco de visor. */
+/** v3.4: receta de estilo activa (Aurora, Synth, Mezcla…), o null en los temas de siempre. */
+val estiloTema: com.xof.ft150ts.EstiloTema? get() = Apariencia.estiloActual()
 val temaIntegrado: Boolean get() = temaFilo || temaPixel || temaTactico || temaHolo || temaAcido || temaCircuito || temaVertice
 
 /**
@@ -83,9 +94,9 @@ fun animacionesReducidas(ctx: Context): Boolean =
  * El acento y los colores del shift light salen de Ajustes > Apariencia.
  */
 object Paleta {
-    val fondo = Color(0xFF000000)
-    val texto = Color(0xFFEEF3EF)
-    val textoSec = Color(0xFF8D989C)
+    val fondo: Color get() = if (temaRacing) Color(0xFF080510) else Color(0xFF000000)
+    val texto: Color get() = if (temaRacing) Color(0xFFF7F2FF) else Color(0xFFEEF3EF)
+    val textoSec: Color get() = if (temaRacing) Color(0xFFA69AB8) else Color(0xFF8D989C)
     val plata = Color(0xFFB8C2C6)
     val blanco = Color(0xFFF4F7F2)
     val ambar = Color(0xFFFFB020)
@@ -96,24 +107,33 @@ object Paleta {
     // Superficies: sólidas en Carbono, translúcidas en Vidrio, casi negras en Filo (el acento manda);
     // en Holo, teñidas con un poquito del acento (se siente como luz proyectada)
     val superficie: Color get() = when {
+        estiloTema != null -> Color(estiloTema!!.superficie)
         esVidrio -> Color(0x17FFFFFF); temaFilo -> Color(0xFF07090A); temaPixel -> Color(0xFF090B09)
         temaTactico -> Color(0xFF050706); temaHolo -> lima.copy(alpha = 0.05f).compositeOver(fondo)
         temaAcido -> Color(0xFF080905); temaCircuito -> Color(0xFF05090A); temaVertice -> Color(0xFF0C0F11)
+        temaTinta -> Color(0xFF111111)
         else -> Color(0xFF0E1113)
     }
     val superficie2: Color get() = when {
+        estiloTema != null -> Color(estiloTema!!.superficie2)
         esVidrio -> Color(0x24FFFFFF); temaFilo -> Color(0xFF12171A); temaPixel -> Color(0xFF141814)
         temaTactico -> Color(0xFF0F1412); temaHolo -> lima.copy(alpha = 0.10f).compositeOver(fondo)
         temaAcido -> Color(0xFF13160C); temaCircuito -> Color(0xFF0E1618); temaVertice -> Color(0xFF161B1E)
+        temaTinta -> Color(0xFF1D1D1D)
         else -> Color(0xFF181D20)
     }
     val borde: Color get() = when {
+        estiloTema != null -> Color(estiloTema!!.borde)
         esVidrio -> Color(0x33FFFFFF); temaFilo -> Color(0xFF222A2E); temaPixel -> Color(0xFF2A332A)
         temaTactico -> Color(0xFF1C2420); temaHolo -> lima.copy(alpha = 0.30f).compositeOver(fondo)
         temaAcido -> lima.copy(alpha = 0.22f).compositeOver(Color(0xFF15180D)); temaCircuito -> Color(0xFF1B2A2D)
         temaVertice -> Color(0xFF242B2F)
+        temaTinta -> Color(0xFF8A8A8A)          // la tinta fuerte va en las tarjetas; lo demás, gris de lápiz
         else -> Color(0xFF262D31)
     }
+
+    /** Tinta: el contorno de las viñetas (blanco papel sobre negro). */
+    val tinta = Color(0xFFF2F0EA)
 
     /** Color de acento elegido (por defecto verde lima de la FT150TS). */
     val lima: Color get() = Color(Apariencia.colorAcento())
@@ -189,6 +209,11 @@ object Formas {
     private val vertChica = CutCornerShape(topStart = CORTE_VERTICE_CHICA.dp, topEnd = 0.dp, bottomEnd = 5.dp, bottomStart = 0.dp)
     private val vertBoton = CutCornerShape(topStart = 12.dp, topEnd = 0.dp, bottomEnd = 12.dp, bottomStart = 0.dp)
     private val vertChip = CutCornerShape(topStart = 7.dp, topEnd = 0.dp, bottomEnd = 7.dp, bottomStart = 0.dp)
+    // Tinta: cuadros de historieta con la orilla de arriba un poco inclinada (como dibujados a mano)
+    private val tintaTarjeta = Vineta(5.dp, 3.dp)
+    private val tintaChica = Vineta(3.dp, 2.dp)
+    private val tintaBoton = Vineta(2.dp, 2.dp)
+    private val tintaChip = CutCornerShape(2.dp)
     private val corteTarjeta = CutCornerShape(topStart = 14.dp, topEnd = 0.dp, bottomEnd = 14.dp, bottomStart = 0.dp)
     private val corteChica = CutCornerShape(topStart = 8.dp, topEnd = 0.dp, bottomEnd = 8.dp, bottomStart = 0.dp)
     private val corteBoton = CutCornerShape(topStart = 10.dp, topEnd = 0.dp, bottomEnd = 10.dp, bottomStart = 0.dp)
@@ -199,21 +224,28 @@ object Formas {
     private val redChip = RoundedCornerShape(50)
 
     val tarjeta: Shape get() = when {
+        estiloTema != null -> FormasEstilo.de(estiloTema!!).tarjeta
         esVidrio -> redTarjeta; temaFilo -> filoTarjeta; temaPixel -> pixTarjeta; temaTactico -> tacTarjeta; temaHolo -> holoTarjeta
-        temaAcido -> acidoTarjeta; temaCircuito -> circTarjeta; temaVertice -> vertTarjeta; else -> corteTarjeta
+        temaAcido -> acidoTarjeta; temaCircuito -> circTarjeta; temaVertice -> vertTarjeta; temaTinta -> tintaTarjeta; else -> corteTarjeta
     }
     val chica: Shape get() = when {
+        estiloTema != null -> FormasEstilo.de(estiloTema!!).chica
         esVidrio -> redChica; temaFilo -> filoChica; temaPixel -> pixChica; temaTactico -> tacChica; temaHolo -> holoChica
-        temaAcido -> acidoChica; temaCircuito -> circChica; temaVertice -> vertChica; else -> corteChica
+        temaAcido -> acidoChica; temaCircuito -> circChica; temaVertice -> vertChica; temaTinta -> tintaChica; else -> corteChica
     }
     val boton: Shape get() = when {
+        estiloTema != null -> FormasEstilo.de(estiloTema!!).boton
         esVidrio -> redBoton; temaFilo -> filoBoton; temaPixel -> pixBoton; temaTactico -> tacBoton; temaHolo -> holoBoton
-        temaAcido -> acidoBoton; temaCircuito -> circBoton; temaVertice -> vertBoton; else -> corteBoton
+        temaAcido -> acidoBoton; temaCircuito -> circBoton; temaVertice -> vertBoton; temaTinta -> tintaBoton; else -> corteBoton
     }
     val chip: Shape get() = when {
+        estiloTema != null -> FormasEstilo.de(estiloTema!!).chip
         esVidrio -> redChip; temaFilo -> filoChip; temaPixel -> pixChip; temaTactico -> tacChip; temaHolo -> holoChip
-        temaAcido -> acidoChip; temaCircuito -> circChip; temaVertice -> vertChip; else -> corteChip
+        temaAcido -> acidoChip; temaCircuito -> circChip; temaVertice -> vertChip; temaTinta -> tintaChip; else -> corteChip
     }
+
+    /** ¿Es una viñeta grande de Tinta? (lleva trama de puntos en la esquina) */
+    fun esVinetaGrande(forma: Shape) = forma === tintaTarjeta
 
     /** Corte del vértice (arriba-izquierda) en Vértice; 0 si no aplica. */
     fun corteVertice(forma: Shape): Int = when (forma) {
@@ -308,6 +340,66 @@ class CorteEscalonado(val tam: Dp, val pasos: Int) : Shape {
         p.lineTo(0f, h)
         p.close()
         return Outline.Generic(p)
+    }
+}
+
+/**
+ * Viñeta de historieta (tema Tinta): cuadro con la orilla de arriba inclinada [caida] (baja hacia la derecha) y la de
+ * abajo inclinada [subida] al revés, para que no se vea como caja de computadora sino como cuadro dibujado.
+ */
+class Vineta(val caida: Dp, val subida: Dp) : Shape {
+    override fun createOutline(size: Size, layoutDirection: LayoutDirection, density: Density): Outline {
+        val a = with(density) { caida.toPx() }.coerceAtMost(size.height / 6f)
+        val b = with(density) { subida.toPx() }.coerceAtMost(size.height / 6f)
+        val p = Path().apply {
+            moveTo(0f, 0f); lineTo(size.width, a); lineTo(size.width, size.height); lineTo(0f, size.height - b); close()
+        }
+        return Outline.Generic(p)
+    }
+}
+
+/**
+ * Tinta: sombra sólida del acento desplazada abajo-derecha (va ANTES del clip, por fuera de la viñeta), como impresión
+ * de cómic fuera de registro. Se arma una vez por tamaño.
+ */
+fun Modifier.sombraTinta(forma: Shape, color: Color): Modifier = drawWithCache {
+    val camino = Path().apply { addOutline(forma.createOutline(size, layoutDirection, this@drawWithCache)) }
+    val d = 4.dp.toPx()
+    onDrawBehind {
+        drawContext.transform.translate(d, d)
+        drawPath(camino, color)
+        drawContext.transform.translate(-d, -d)
+    }
+}
+
+/**
+ * Tinta: trama de puntos (halftone) en la esquina de arriba-derecha, que se hace más chica hacia el centro. Va DETRÁS
+ * del contenido (no tapa números ni textos) y en una zona chica. Se dibuja una vez por tamaño.
+ */
+fun Modifier.tramaTinta(conTrama: Boolean, color: Color): Modifier = drawWithCache {
+    val w = size.width
+    val h = size.height
+    val paso = 6.dp.toPx()
+    val radioMax = 1.7.dp.toPx()
+    val zona = minOf(w * 0.24f, 84.dp.toPx())
+    val altoZona = minOf(h * 0.4f, 44.dp.toPx())
+    val puntos = ArrayList<Triple<Float, Float, Float>>()
+    if (conTrama && w > 120.dp.toPx()) {
+        var y = paso
+        while (y < altoZona) {
+            var x = w - paso
+            while (x > w - zona) {
+                // Más grande en la esquina, más chico hacia adentro (distancia normalizada)
+                val k = 1f - ((w - x) / zona * 0.6f + y / altoZona * 0.4f)
+                if (k > 0.08f) puntos.add(Triple(x, y, radioMax * k))
+                x -= paso
+            }
+            y += paso
+        }
+    }
+    onDrawWithContent {
+        puntos.forEach { (x, y, r) -> drawCircle(color.copy(alpha = 0.22f), r, Offset(x, y)) }
+        drawContent()
     }
 }
 
@@ -498,6 +590,7 @@ fun Modifier.decoracionTema(forma: Shape, color: Color): Modifier = when {
     temaAcido -> cintaAcido(Formas.corteAcido(forma), color)
     temaCircuito -> pistasCircuito(Formas.corteCircuito(forma), color)
     temaVertice -> losaVertice(Formas.corteVertice(forma), color)
+    temaTinta -> tramaTinta(Formas.esVinetaGrande(forma), Paleta.tinta)
     else -> this
 }
 
@@ -508,6 +601,15 @@ fun Modifier.decoracionTema(forma: Shape, color: Color): Modifier = when {
 fun Modifier.panel(forma: Shape = Formas.tarjeta, conBorde: Boolean = true): Modifier {
     val neon = Apariencia.neon && conBorde
     val acento = Paleta.lima
+    estiloTema?.let { return this.panelEstilo(it, forma, conBorde, neon) }
+    if (temaTinta) {
+        // Viñeta: sombra sólida del acento por fuera, papel negro, contorno de tinta grueso y trama en la esquina
+        if (!conBorde) return this.clip(forma).background(Paleta.superficie)
+        val conSombra = (if (neon) this.resplandor(forma, acento) else this).sombraTinta(forma, acento.copy(alpha = 0.85f))
+        return conSombra.clip(forma).background(Paleta.superficie)
+            .border(2.5.dp, Paleta.tinta, forma)
+            .tramaTinta(Formas.esVinetaGrande(forma), Paleta.tinta)
+    }
     if (temaVertice) {
         // Losa: degradado grafito de arriba hacia abajo y, en lugar de contorno, el vértice y la luz de borde
         val losa = (if (neon) this.resplandor(forma, acento) else this).clip(forma)
@@ -544,6 +646,14 @@ fun Modifier.panel(forma: Shape = Formas.tarjeta, conBorde: Boolean = true): Mod
  */
 @Composable
 fun FondoApp(modifier: Modifier = Modifier) {
+    estiloTema?.let { e ->
+        val acentoE = Paleta.lima
+        Box(modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).background(Paleta.fondo).drawWithCache {
+            val pintar = construirFondo(e, size, this, acentoE)
+            onDrawBehind { pintar() }
+        })
+        return
+    }
     val vidrio = esVidrio
     val filo = temaFilo
     val pixel = temaPixel
@@ -552,13 +662,14 @@ fun FondoApp(modifier: Modifier = Modifier) {
     val acido = temaAcido
     val circuito = temaCircuito
     val vertice = temaVertice
+    val tinta = temaTinta
     val neon = Apariencia.neon
-    // Vértice trae su propia textura (fibra de carbono): no se le encima la de Ajustes
-    val textura = if (vertice) 3 else Apariencia.fondo
+    // Vértice (fibra de carbono) y Tinta (líneas de velocidad) traen su propia textura: no se les encima la de Ajustes
+    val textura = if (vertice || tinta) 3 else Apariencia.fondo
     val acento = Paleta.lima
     val segundo = Paleta.rpmAlta
     Box(
-        modifier.fillMaxSize().graphicsLayer().background(Paleta.fondo).drawWithCache {
+        modifier.fillMaxSize().graphicsLayer(compositingStrategy = CompositingStrategy.Offscreen).background(Paleta.fondo).drawWithCache {
             val w = size.width
             val h = size.height
             // ---- textura ----
@@ -741,9 +852,45 @@ fun FondoApp(modifier: Modifier = Modifier) {
                 chevron.lineTo(cx + grueso, cy); chevron.lineTo(cx - alto * 0.5f + grueso, cy + alto / 2)
                 chevron.lineTo(cx - alto * 0.5f, cy + alto / 2); chevron.lineTo(cx, cy); chevron.close()
             }
+            // Tinta: líneas de velocidad (cuñas finas) que salen de un punto de fuga a la izquierda, como viñeta de
+            // persecución, y una trama de puntos que crece hacia abajo a la derecha. Semilla fija: siempre iguales.
+            val velocidad = Path()
+            val trama = ArrayList<Triple<Float, Float, Float>>()
+            if (tinta) {
+                val fx = -w * 0.15f
+                val fy = h * 0.42f
+                val largo = (w + h) * 1.4f
+                val r = java.util.Random(150)
+                repeat(56) {
+                    val ang = Math.toRadians((-38.0 + r.nextDouble() * 76.0))
+                    val ancho = Math.toRadians(0.25 + r.nextDouble() * 0.6)
+                    val ini = w * (0.25f + r.nextFloat() * 0.35f)          // empiezan lejos del punto: centro limpio
+                    fun punto(d: Float, a: Double) = Offset(fx + d * Math.cos(a).toFloat(), fy + d * Math.sin(a).toFloat())
+                    val p0 = punto(ini, ang)
+                    val p1 = punto(largo, ang - ancho)
+                    val p2 = punto(largo, ang + ancho)
+                    velocidad.moveTo(p0.x, p0.y); velocidad.lineTo(p1.x, p1.y); velocidad.lineTo(p2.x, p2.y); velocidad.close()
+                }
+                val paso = 11.dp.toPx()
+                val rMax = 3.2.dp.toPx()
+                var y = h * 0.55f
+                while (y < h) {
+                    var x = w * 0.55f
+                    while (x < w) {
+                        val k = ((x - w * 0.55f) / (w * 0.45f)) * 0.55f + ((y - h * 0.55f) / (h * 0.45f)) * 0.45f
+                        if (k > 0.1f) trama.add(Triple(x, y, rMax * k))
+                        x += paso
+                    }
+                    y += paso
+                }
+            }
             val g1 = 1.dp.toPx()
             val g2 = 2.dp.toPx()
             onDrawBehind {
+                if (tinta) {
+                    drawPath(velocidad, Color.White.copy(alpha = 0.045f))
+                    trama.forEach { (x, y, rr) -> drawCircle(acento.copy(alpha = 0.10f), rr, Offset(x, y)) }
+                }
                 if (vertice) {
                     drawPath(tejidoA, Color.White.copy(alpha = 0.022f), style = Stroke(g1))
                     drawPath(tejidoB, Color.White.copy(alpha = 0.014f), style = Stroke(g1))

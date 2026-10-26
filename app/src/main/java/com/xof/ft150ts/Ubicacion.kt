@@ -448,4 +448,32 @@ object UbicacionManager {
         if (!l.hasSpeed() || edadMs() > 3_000) return -1f
         return l.speed * 3.6f
     }
+
+    /**
+     * Velocidad solo si es creíble: bajo techo el GPS rebota y saca velocidades falsas (10–30 km/h con el teléfono
+     * quieto). Se descarta si la posición viene mala (> 25 m), si el propio GPS dice que la velocidad tiene más de
+     * ±2.5 m/s de error o si hay menos de 4 satélites con buena señal. -1 = no confiable.
+     */
+    fun velocidadConfiableKmh(): Float {
+        val l = ubicacion.value ?: return -1f
+        if (!l.hasSpeed() || edadMs() > 3_000) return -1f
+        if (!SeguridadVel.confiable(l.hasAccuracy(), l.accuracy,
+                android.os.Build.VERSION.SDK_INT >= 26 && l.hasSpeedAccuracy(),
+                if (android.os.Build.VERSION.SDK_INT >= 26) l.speedAccuracyMetersPerSecond else 0f,
+                estado.value.senalDebil)) return -1f
+        return l.speed * 3.6f
+    }
+}
+
+/** Reglas para creerle a la velocidad del GPS (sin Android: se prueban en SeguridadVelTest). */
+object SeguridadVel {
+    fun confiable(tienePrecision: Boolean, precisionM: Float, tieneErrorVel: Boolean, errorVelMs: Float, senalDebil: Boolean): Boolean {
+        if (senalDebil) return false
+        if (tienePrecision && precisionM > 25f) return false
+        if (tieneErrorVel && errorVelMs > 2.5f) return false
+        return true
+    }
+
+    /** El aviso entra solo si la velocidad pasó el límite [MUESTRAS] veces seguidas (cada 0.5 s = 2 s). */
+    const val MUESTRAS = 4
 }

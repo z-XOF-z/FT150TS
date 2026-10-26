@@ -37,7 +37,7 @@
      Llamada entrante: OK = contestar, OK largo = colgar/rechazar.
 
    MAPA DE CONEXIONES (ESP32-S3 DevKitC-1)
-   GPIO1  <- batería 12V por divisor 100k/27k (+100nF a GND)
+   GPIO1  <- batería 12V por divisor 100k/22k (+100nF a GND; 27k en el cableado viejo)
    GPIO2  <- sensor de gasolina (divisor con resistencia fija a 3.3V)
    GPIO4  <- 18650 por divisor 100k/100k
    GPIO5  <- LDR a 3.3V + 10k a GND
@@ -83,6 +83,12 @@
 
 #define USAR_IGNICION 1    // 1 = hay cable de ignición (llave) conectado al ESP32
 
+// Corte de chispa (limitador de RPM, launch control y quickshifter). Pon 1 SOLO cuando ya
+// tengas armado el corte de chispa (placa base v2.1: PC817 + IRF840; ver firmware/HARDWARE-CORTE-CHISPA.md)
+// y hayas puesto el pin en PIN_CORTE_CHISPA. Con 0 no se compila nada que toque la chispa.
+// Aun con 1, cada función arranca apagada y se prende desde la app.
+#define USAR_CORTE_CHISPA 0
+
 #include <Wire.h>
 #include <SPI.h>
 #include <SD.h>
@@ -109,7 +115,7 @@
   #include <BLESecurity.h>
 #endif
 
-#define FW_VERSION "v1.4"
+#define FW_VERSION "v1.5"
 
 // ================================================================
 // 1) TAMAÑOS Y TIPOS
@@ -312,6 +318,12 @@ const uint8_t PIN_GPS_TX       = 42;   // va al RX del GPS
 const int8_t  PIN_BACKLIGHT_PWM = -1;  // 47 si quitas el jumper del backpack y usas transistor
 const int8_t  PIN_PERIF_EN      = -1;  // 3 si pones un MOSFET que apague GPS y LEDs al dormir
 
+// Corte de chispa (solo con USAR_CORTE_CHISPA 1). -1 = no instalado.
+const int8_t  PIN_CORTE_CHISPA  = -1;  // 47 en la placa base v2.1 (PC817 + IRF840 al cable de paro)
+const int8_t  PIN_QS_SENSOR     = -1;  // sugerido 38 o 48 (el que NO tenga el LED RGB de tu placa)
+const bool CHISPA_ACTIVO_ALTO   = true;  // true = HIGH prende el IRF840 = cable de paro a tierra = sin chispa
+const bool QS_ACTIVO_BAJO       = true;  // el sensor de la palanca manda a tierra al pisar
+
 const bool RELE_ACTIVO_ALTO     = true;  // true = HIGH energiza el relevador
 const bool IGNICION_ACTIVA_BAJO = true;  // con optoacoplador: LOW = llave ON
 const bool NEUTRAL_ACTIVO_BAJO  = true;  // el switch manda a tierra en neutral
@@ -347,7 +359,7 @@ const float PERFIL_FACTOR[2] = {0.75f, 1.0f};  // ECO cambia antes, SPORT al pun
 const float PID_KP = 0.8f, PID_KI = 0.05f, PID_KD = 0.1f;
 
 // ---------- Baterías ----------
-const float BAT_R1 = 100000.0f, BAT_R2 = 27000.0f;
+const float BAT_R1 = 100000.0f, BAT_R2 = 22000.0f;   // placa base v1: 22k (aguanta 16 V); el cableado viejo usaba 27k
 const float LIPO_R1 = 100000.0f, LIPO_R2 = 100000.0f;
 const float LIPO_FACTOR = 1.0f;               // <-- X ajusta contra multímetro
 const float BAT_BAJA_V = 12.0f;
@@ -435,6 +447,12 @@ volatile uint32_t g_rpmUltUs = 0, g_rpmPerUs = 0;
 volatile uint32_t g_hallUltUs = 0, g_hallPerUs = 0;
 volatile bool     g_hallVisto = false;
 float g_rpmFilt = 0;
+// Diagnóstico de encendido (lo llena isrRpm, solo con números enteros: en una
+// interrupción no se usa el FPU)
+volatile uint32_t g_pulsos = 0;           // chispas contadas desde que arrancó
+volatile uint32_t g_chispaFaltas = 0;     // pulso que llegó al doble de lo esperado = chispa que faltó
+volatile uint32_t g_irrSuma = 0, g_irrN = 0;  // variación entre pulsos seguidos (por mil)
+volatile bool     g_cortandoChispa = false;   // mientras se corta a propósito no se cuentan faltas
 
 // GPS
 uint32_t g_gpsChars = 0, g_gpsUltChar = 0;
@@ -764,6 +782,17 @@ void IRAM_ATTR isrRpm() {
   uint32_t t = micros();
   uint32_t d = t - g_rpmUltUs;
   if (d < 4000) return;          // filtro de rebote / ruido (> 15000 rpm)
+  uint32_t ant = g_rpmPerUs;
+  g_pulsos++;
+  // Entre 1500 y 9000 rpm (periodos de 6.6 a 40 ms) y sin corte propio
+  if (!g_cortandoChispa && ant >= 6600 && ant <= 40000 && d < 100000) {
+    if (d * 10 > ant * 17 && d * 10 < ant * 23) g_chispaFaltas++;
+    else if (d * 10 < ant * 13 && d * 10 > ant * 7) {
+      uint32_t dif = d > ant ? d - ant : ant - d;
+      g_irrSuma += dif * 1000 / ant;
+      g_irrN++;
+    }
+  }
   g_rpmPerUs = d;
   g_rpmUltUs = t;
 }
@@ -1321,6 +1350,7 @@ void motorActualizar() {
       float dip = (g_vMinArranque < 90) ? g_vMinArranque : NAN;
       registrarEvento(EVT_ARRANQUE, isnan(dip) ? 0 : dip);
       g_arranqueDebil = !isnan(dip) && dip < ARRANQUE_DEBIL_V;
+      avanzadoArranque(dip);
       g_vMinArranque = 99;
     }
   } else {
@@ -1581,6 +1611,240 @@ bool corteCambiar(bool activar, Print& out) {
   registrarEvento(EVT_CORTE, activar ? 1 : 0);
   out.println(activar ? F("Motor BLOQUEADO.") : F("Motor desbloqueado."));
   return true;
+}
+
+// ================================================================
+// 21b) FUNCIONES AVANZADAS (todas apagadas de fábrica)
+// ================================================================
+// Limitador de RPM, launch control y quickshifter cortan la chispa unos milisegundos
+// poniendo a tierra el cable de paro del CDI con un MOSFET (ver HARDWARE-CORTE-CHISPA.md).
+// El relevador de PIN_RELE NO sirve para esto: es mecánico, tarda 5-15 ms y se gasta.
+// Reglas de seguridad (no se pueden quitar desde la app):
+//   - Sin USAR_CORTE_CHISPA 1 y un pin válido no se toca nada.
+//   - Nada corta en modo demo, con la llave apagada o con el motor apagado.
+//   - Ningún corte dura más de CORTE_MAX_MS; después la chispa vuelve al menos CORTE_PAUSA_MIN_MS.
+//   - Si la tarjeta se reinicia o se cuelga, el pin queda sin señal y el MOSFET suelta (la moto
+//     sigue con chispa normal): el corte falla "abierto".
+//   - Prender cualquiera pide enlace cifrado, la moto parada y la palabra "confirmar".
+// El diagnóstico de motor y batería solo mide (no corta nada) y también arranca apagado.
+const uint16_t LIM_RPM_MIN = 6000, LIM_RPM_MAX = 11000, LIM_RPM_DEF = 9500;
+const uint16_t LC_RPM_MIN  = 3000, LC_RPM_MAX  = 8000,  LC_RPM_DEF  = 6000;
+const uint8_t  QS_MS_MIN   = 30,   QS_MS_MAX   = 100,   QS_MS_DEF   = 60;
+const uint16_t QS_RPM_MIN  = 3000, QS_RPM_MAX  = 9000,  QS_RPM_DEF  = 4500;
+const uint16_t CORTE_MAX_MS       = 120;   // tope de un corte seguido
+const uint16_t CORTE_PAUSA_MIN_MS = 40;    // chispa obligada entre cortes
+const uint16_t LIM_CORTE_MS       = 20;    // golpe del limitador (unas 3 vueltas a 9500)
+const uint16_t QS_BLOQUEO_MS      = 400;   // tiempo mínimo entre dos cambios
+const float    QS_VEL_MIN         = 15.0f; // el quickshifter solo rodando
+const float    LC_VEL_FIN         = 15.0f; // el launch se suelta al pasar esta velocidad
+const uint8_t  NUM_ARRANQUES_DIAG = 5;
+
+struct Avanzado {
+  uint32_t magic;
+  bool lim; uint16_t limRpm;
+  bool lc;  uint16_t lcRpm;
+  bool qs;  uint8_t qsMs; uint16_t qsRpm;
+  bool diag;
+  float arranques[NUM_ARRANQUES_DIAG];   // voltaje mínimo de los últimos arranques
+  uint8_t idxArr;
+};
+const uint32_t MAGIC_AVANZADO = 0xF150AD01;
+Avanzado A;
+uint32_t g_cortesLim = 0, g_cortesQs = 0;
+bool g_lcListo = false;            // launch armado: parado, fuera de neutral
+
+#if USAR_CORTE_CHISPA
+const bool HAY_CORTE_CHISPA = PIN_CORTE_CHISPA >= 0;
+#else
+const bool HAY_CORTE_CHISPA = false;
+#endif
+
+void avanzadoDefaults() {
+  memset(&A, 0, sizeof(A));
+  A.magic = MAGIC_AVANZADO;
+  A.limRpm = LIM_RPM_DEF; A.lcRpm = LC_RPM_DEF; A.qsMs = QS_MS_DEF; A.qsRpm = QS_RPM_DEF;
+  for (uint8_t i = 0; i < NUM_ARRANQUES_DIAG; i++) A.arranques[i] = NAN;
+}
+
+void avanzadoGuardar() {
+  Preferences s;
+  s.begin("avanzado", false);
+  s.putBytes("a", &A, sizeof(A));
+  s.end();
+}
+
+void avanzadoCargar() {
+  Preferences s;
+  s.begin("avanzado", true);
+  bool ok = s.getBytesLength("a") == sizeof(A) && s.getBytes("a", &A, sizeof(A)) == sizeof(A) && A.magic == MAGIC_AVANZADO;
+  s.end();
+  if (!ok) avanzadoDefaults();
+  A.limRpm = constrain(A.limRpm, LIM_RPM_MIN, LIM_RPM_MAX);
+  A.lcRpm = constrain(A.lcRpm, LC_RPM_MIN, LC_RPM_MAX);
+  A.qsMs = constrain(A.qsMs, QS_MS_MIN, QS_MS_MAX);
+  A.qsRpm = constrain(A.qsRpm, QS_RPM_MIN, QS_RPM_MAX);
+  if (!HAY_CORTE_CHISPA) { A.lim = false; A.lc = false; A.qs = false; }
+}
+
+// Lo llama motorActualizar al detectar un arranque (con diagnóstico prendido)
+void avanzadoArranque(float dip) {
+  if (!A.diag || isnan(dip)) return;
+  A.arranques[A.idxArr % NUM_ARRANQUES_DIAG] = dip;
+  A.idxArr = (A.idxArr + 1) % NUM_ARRANQUES_DIAG;
+  avanzadoGuardar();
+}
+
+#if USAR_CORTE_CHISPA
+void chispaPin(bool cortar) {
+  g_cortandoChispa = cortar;
+  digitalWrite(PIN_CORTE_CHISPA, (cortar == CHISPA_ACTIVO_ALTO) ? HIGH : LOW);
+}
+
+bool qsPisado() {
+  if (PIN_QS_SENSOR < 0) return false;
+  return (digitalRead(PIN_QS_SENSOR) == LOW) == QS_ACTIVO_BAJO;
+}
+
+// Tarea propia (cada 1 ms) para que el corte no dependa de lo que tarde loop() con el LCD.
+void tareaChispa(void*) {
+  uint32_t cortaDesde = 0, cortaHasta = 0, libreDesde = 0;
+  uint32_t pulsosAlSoltar = 0, ultQs = 0;
+  uint8_t qsCuenta = 0;
+  bool qsSuelto = true;
+  for (;;) {
+    uint32_t ms = millis();
+    bool cortando = cortaHasta != 0;
+    float v = isnan(datos.vel) ? 0 : datos.vel;
+    bool permitido = !g_modoDemo && datos.ignicion && g_motorEnc && (A.lim || A.lc || A.qs);
+
+    if (cortando) {
+      // Fin del golpe, tope de seguridad o algo dejó de permitirlo
+      if (!permitido || (int32_t)(ms - cortaHasta) >= 0 || ms - cortaDesde >= CORTE_MAX_MS) {
+        chispaPin(false);
+        cortaHasta = 0;
+        libreDesde = ms;
+        pulsosAlSoltar = g_pulsos;
+      }
+    } else if (permitido && ms - libreDesde >= CORTE_PAUSA_MIN_MS) {
+      uint16_t duracion = 0;
+
+      // Quickshifter: flanco del sensor (2 lecturas seguidas), rodando, en 1a a 4a
+      bool pisado = qsPisado();
+      qsCuenta = pisado ? min(qsCuenta + 1, 3) : 0;
+      if (!pisado) qsSuelto = true;
+      if (A.qs && qsSuelto && qsCuenta >= 2 && v > QS_VEL_MIN && datos.marcha >= 1 &&
+          datos.marcha < NUM_MARCHAS && datos.rpm >= A.qsRpm && ms - ultQs > QS_BLOQUEO_MS) {
+        duracion = A.qsMs;
+        qsSuelto = false;
+        ultQs = ms;
+        g_cortesQs++;
+      }
+
+      // Limitador / launch: solo con RPM recién medidas (2 chispas después del último corte,
+      // porque mientras se corta no hay pulsos y la lectura se queda vieja)
+      if (!duracion && g_pulsos - pulsosAlSoltar >= 2) {
+        uint16_t tope = 0;
+        if (A.lim) tope = A.limRpm;
+        if (A.lc && g_lcListo) tope = tope ? min(tope, A.lcRpm) : A.lcRpm;
+        int rpm = rpmInstantanea();
+        if (tope && rpm > tope) { duracion = LIM_CORTE_MS; g_cortesLim++; }
+      }
+
+      if (duracion) {
+        chispaPin(true);
+        cortaDesde = ms;
+        cortaHasta = ms + duracion;
+      }
+    }
+    vTaskDelay(1);
+  }
+}
+#endif
+
+void avanzadoBegin() {
+  avanzadoCargar();
+#if USAR_CORTE_CHISPA
+  if (PIN_CORTE_CHISPA >= 0) {
+    pinMode(PIN_CORTE_CHISPA, OUTPUT);
+    chispaPin(false);
+    if (PIN_QS_SENSOR >= 0) pinMode(PIN_QS_SENSOR, INPUT_PULLUP);
+    // Núcleo 1 (el de loop), prioridad arriba de loop
+    xTaskCreatePinnedToCore(tareaChispa, "chispa", 3072, nullptr, 3, nullptr, 1);
+  }
+#endif
+}
+
+// Cada tick (100 ms): arma o suelta el launch control
+void avanzadoTick() {
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (!A.lc) g_lcListo = false;
+  else if (v < VEL_MAX_CORTE && !datos.neutral && g_motorEnc) g_lcListo = true;
+  else if (v > LC_VEL_FIN || !g_motorEnc) g_lcListo = false;
+}
+
+void avanzadoJson(Print& out) {
+  out.printf("{\"av\":1,\"hw\":%d,\"qsh\":%d,\"lim\":%d,\"lr\":%u,\"lc\":%d,\"lcr\":%u,\"qs\":%d,\"qm\":%u,\"qr\":%u,\"dg\":%d}\n",
+             HAY_CORTE_CHISPA ? 1 : 0, (HAY_CORTE_CHISPA && PIN_QS_SENSOR >= 0) ? 1 : 0,
+             A.lim, A.limRpm, A.lc, A.lcRpm, A.qs, A.qsMs, A.qsRpm, A.diag);
+}
+
+//  av                              estado en JSON (la app lo lee)
+//  av lim on 9500 confirmar | off  limitador de RPM
+//  av lc on 6000 confirmar | off   launch control
+//  av qs on 60 4500 confirmar | off  quickshifter (ms de corte, rpm mínimas)
+//  av diag on|off                  diagnóstico de motor y batería
+void avanzadoComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "") { avanzadoJson(out); return; }
+  if (c1 == "diag") {
+    A.diag = (c2 == "on");
+    if (A.diag) { noInterrupts(); g_chispaFaltas = 0; g_irrSuma = 0; g_irrN = 0; interrupts(); }
+    avanzadoGuardar();
+    avanzadoJson(out);
+    return;
+  }
+  bool esCorte = c1 == "lim" || c1 == "lc" || c1 == "qs";
+  if (!esCorte) { out.println(F("Usa: av | av lim|lc|qs on ... confirmar | off | av diag on|off")); return; }
+  if (c2 == "off") {
+    if (c1 == "lim") A.lim = false; else if (c1 == "lc") A.lc = false; else A.qs = false;
+    avanzadoGuardar();
+    avanzadoJson(out);
+    return;
+  }
+  if (c2 != "on" || low.indexOf("confirmar") < 0) { out.println(F("Falta 'confirmar'.")); return; }
+  if (!HAY_CORTE_CHISPA) { out.println(F("Sin hardware: arma el corte de chispa y compila con USAR_CORTE_CHISPA 1.")); return; }
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (v > VEL_MAX_CORTE) { out.println(F("Solo con la moto parada.")); return; }
+  int n1 = palabra(low, 3).toInt(), n2 = palabra(low, 4).toInt();
+  if (c1 == "lim") { if (n1 > 0) A.limRpm = constrain(n1, LIM_RPM_MIN, LIM_RPM_MAX); A.lim = true; }
+  else if (c1 == "lc") { if (n1 > 0) A.lcRpm = constrain(n1, LC_RPM_MIN, LC_RPM_MAX); A.lc = true; }
+  else {
+    if (PIN_QS_SENSOR < 0) { out.println(F("Sin sensor de quickshifter (PIN_QS_SENSOR).")); return; }
+    if (n1 > 0) A.qsMs = constrain(n1, QS_MS_MIN, QS_MS_MAX);
+    if (n2 > 0) A.qsRpm = constrain(n2, QS_RPM_MIN, QS_RPM_MAX);
+    A.qs = true;
+  }
+  avanzadoGuardar();
+  avanzadoJson(out);
+}
+
+// Mensaje "d" para la app (cada 3 s con el diagnóstico prendido)
+int jsonDiagnostico(char* b, size_t n) {
+  noInterrupts();
+  uint32_t faltas = g_chispaFaltas, suma = g_irrSuma, cuenta = g_irrN, pulsos = g_pulsos;
+  interrupts();
+  char arr[48] = "";
+  size_t k = 0;
+  for (uint8_t i = 0; i < NUM_ARRANQUES_DIAG; i++) {
+    float x = A.arranques[(A.idxArr + i) % NUM_ARRANQUES_DIAG];   // del más viejo al más nuevo
+    if (isnan(x)) continue;
+    k += snprintf(arr + k, sizeof(arr) - k, "%s%.2f", k ? "," : "", x);
+  }
+  return snprintf(b, n,
+    "{\"k\":\"d\",\"cf\":%lu,\"pu\":%lu,\"ir\":%lu,\"ar\":[%s],\"ad\":%d,\"ca\":%d,\"ra\":%d,\"cl\":%lu,\"cq\":%lu,\"lc\":%d}",
+    (unsigned long)faltas, (unsigned long)pulsos, (unsigned long)(cuenta ? suma / cuenta : 0), arr,
+    g_arranqueDebil ? 1 : 0, g_estadoCarga, g_ralentiMedido ? (int)g_ralenti : 0,
+    (unsigned long)g_cortesLim, (unsigned long)g_cortesQs, g_lcListo ? 1 : 0);
 }
 
 // ================================================================
@@ -2673,6 +2937,11 @@ void mostrarAyuda(Print& out) {
   out.println(F(" backup                  respaldo ahora (WiFi casa)"));
   out.println(F(" dormir                  prueba el modo ahorro"));
   out.println(F(" borrar todo confirmar   regresa a valores de fabrica"));
+  out.println(F(" av                      funciones avanzadas (JSON)"));
+  out.println(F(" av lim on 9500 confirmar | off   limitador de RPM (requiere corte de chispa)"));
+  out.println(F(" av lc on 6000 confirmar | off    launch control (requiere corte de chispa)"));
+  out.println(F(" av qs on 60 4500 confirmar | off quickshifter (corte + sensor)"));
+  out.println(F(" av diag on|off          diagnostico de motor y bateria"));
 }
 
 void mostrarEstado(Print& out) {
@@ -2727,6 +2996,7 @@ bool comandoDelicado(const String& low) {
   if (c0 == "corte" || c0 == "cal" || c0 == "odo" || c0 == "real" || c0 == "demo" || c0 == "reiniciar" ||
       c0 == "wifi" || c0 == "vel" || c0 == "vincular") return true;
   if (c0 == "mant" && (c1 == "reset" || c1 == "set")) return true;
+  if (c0 == "av" && c1 != "") return true;   // limitador, launch, quickshifter, diagnóstico
   if (c0 == "ios" && (c1 == "olvidar" || c1 == "contestar" || c1 == "colgar")) return true;
   return false;
 }
@@ -2853,6 +3123,7 @@ void ejecutarComando(String linea, Print& out) {
   }
   else if (c0 == "notif") { notifMostrar(linea.substring(6).c_str()); out.println(F("Notificacion mostrada.")); }
   else if (c0 == "cfgjson") cfgJson(out);
+  else if (c0 == "av") avanzadoComando(low, out);
   else if (c0 == "brillo") {
     if (c1 == "auto") P.autoBrillo = true;
     else if (c1 == "fijo") P.autoBrillo = false;
@@ -3204,6 +3475,12 @@ void bleActualizar() {
     int n = (g_turnoLenta++ % 2 == 0) ? jsonEstado(b, sizeof b) : jsonViaje(b, sizeof b);
     if (n > 0) bleNotificar(g_chTel, b, min(n, (int)sizeof(b) - 1));
   }
+  static uint32_t ultDiag = 0;
+  if (A.diag && ms - ultDiag >= 3000) {
+    ultDiag = ms;
+    int n = jsonDiagnostico(b, sizeof b);
+    if (n > 0) bleNotificar(g_chTel, b, min(n, (int)sizeof(b) - 1));
+  }
 }
 #endif
 
@@ -3286,6 +3563,7 @@ void setup() {
   adcBegin();
   nvsCargar();
   releAplicar();   // primero que nada: respeta el bloqueo guardado
+  avanzadoBegin(); // funciones avanzadas: el pin del corte de chispa arranca suelto
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.setClock(100000);
   g_rtcOk = rtc.begin(&Wire);
@@ -3356,6 +3634,7 @@ void loop() {
     tempHistorial();
     static uint8_t cuenta = 0;
     if (++cuenta >= 2) { cuenta = 0; shiftAprender(dt * 2 / 1000.0f); }
+    avanzadoTick();
     releAplicar();
   }
 

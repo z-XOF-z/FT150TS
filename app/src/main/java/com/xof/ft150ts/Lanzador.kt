@@ -41,8 +41,19 @@ object Lanzador {
     val accesos = MutableStateFlow(List(NUM_ACCESOS) { "" })
     /** La app se está viendo (entre onStart y onStop). Con la pantalla apagada las páginas apagan sus relojes. */
     val enPantalla = MutableStateFlow(true)
+    /** La pantalla del tablero (MainActivity) está visible ahora (onStart..onStop). Empieza en false: al revivir el
+     *  proceso sin pantalla (cierre inesperado) se sabe que hay que traerla al frente. */
+    @Volatile var actividadVisible = false
     /** Mostrar la animación de arranque la próxima vez que se vea la app (abriste el switch con la pantalla apagada). */
     val inicioPendiente = MutableStateFlow(false)
+    /**
+     * Abriste el switch: momento del último encendido. El tablero hace su animación una sola vez por encendido
+     * (aunque esté en otra página o con la pantalla apagada: sale en cuanto veas el tablero).
+     */
+    val switchAbierto = MutableStateFlow(0L)
+    /** Último encendido cuya animación ya se mostró. */
+    @Volatile var arranqueVisto = 0L
+    fun pedirArranque() { switchAbierto.value = android.os.SystemClock.elapsedRealtime() }
     /** Cuándo se desbloqueó el modo XOF (para el confeti); 0 = nada. */
     val confeti = MutableStateFlow(0L)
     /** Íconos pixelados al estilo del tablero. */

@@ -182,8 +182,11 @@ object Respaldo {
     /**
      * Ajustes que un respaldo NO trae: los de root. Si no, un archivo ajeno (que te pasen por WhatsApp) podría
      * marcar el root como concedido y prender comandos root al abrir la app. Se quedan como estén en este teléfono.
+     * Tampoco las firmas de DiPlay en que confías: si no, un archivo ajeno podría hacer pasar otra app por DiPlay.
+     * Ni el registro del ahorro nocturno: dice qué regresar (datos, Wi-Fi, grupos de apps); uno ajeno o viejo
+     * haría que "deshacer" cambiara cosas que este teléfono nunca cambió.
      */
-    private val NO_RESTAURAR = setOf("root")
+    private val NO_RESTAURAR = setOf("root", CarPlay.PREFS_CONFIANZA, Nocturno.PREFS_REGISTRO)
 
     /** Lee un respaldo elegido con el selector; null si no es de esta app o es demasiado grande. */
     suspend fun leer(c: Context, uri: Uri): String? = withContext(Dispatchers.IO) {

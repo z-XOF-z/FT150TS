@@ -23,6 +23,7 @@ import java.io.File
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
+import kotlin.math.roundToInt
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -38,12 +39,15 @@ import kotlinx.coroutines.withContext
  * últimos N minutos (los viejos se borran solos). "Guardar clip" (o un golpe fuerte) copia los
  * últimos 3 minutos a la galería, en Películas/FT150TS. Sin audio (solo sería viento).
  * Graba solo con la app en pantalla y, si quieres, solo en la moto. Se pausa si el teléfono se calienta.
+ * Con "telemetría" (apagada de fábrica) cada pedazo lleva un .srt con velocidad, RPM, marcha, voltaje
+ * y ubicación segundo a segundo: VLC y casi todos los reproductores lo muestran como subtítulo.
  */
 object Dashcam {
     val activo = MutableStateFlow(false)
     val soloEnMoto = MutableStateFlow(true)
     val minutos = MutableStateFlow(10)           // minutos que se guardan en bucle
     val calidadAlta = MutableStateFlow(false)    // false = 720p (calienta menos), true = 1080p
+    val telemetria = MutableStateFlow(false)     // .srt con los datos de la moto junto a cada pedazo
     val grabando = MutableStateFlow(false)
     val mensaje = MutableStateFlow("")
     val usoMb = MutableStateFlow(0)
@@ -57,6 +61,7 @@ object Dashcam {
     private var grabacion: Recording? = null
     private var vigilante: Job? = null
     private var corte: Job? = null
+    private var subtitulos: Job? = null
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
     private const val SEGMENTO_MS = 60_000L
 
@@ -69,6 +74,7 @@ object Dashcam {
         soloEnMoto.value = p.getBoolean("soloEnMoto", true)
         minutos.value = p.getInt("minutos", 10)
         calidadAlta.value = p.getBoolean("alta", false)
+        telemetria.value = p.getBoolean("telemetria", false)
         actualizarUso()
     }
 
@@ -90,6 +96,7 @@ object Dashcam {
     }
     fun ponerSoloEnMoto(on: Boolean) { soloEnMoto.value = on; guardarPref { it.putBoolean("soloEnMoto", on) }; revisar() }
     fun ponerMinutos(m: Int) { minutos.value = m.coerceIn(3, 60); guardarPref { it.putInt("minutos", minutos.value) }; limpiar() }
+    fun ponerTelemetria(on: Boolean) { telemetria.value = on; guardarPref { it.putBoolean("telemetria", on) } }
     fun ponerCalidad(alta: Boolean) {
         calidadAlta.value = alta
         guardarPref { it.putBoolean("alta", alta) }
@@ -181,6 +188,8 @@ object Dashcam {
             grabacion = esta
             grabando.value = true
             mensaje.value = ""
+            subtitulos?.cancel()
+            subtitulos = if (telemetria.value) escribirSubtitulos(File(carpeta(), nombre.removeSuffix(".mp4") + ".srt")) else null
             corte?.cancel()
             corte = scope.launch { delay(SEGMENTO_MS); grabacion?.stop() }
         } catch (e: Exception) {
@@ -190,8 +199,26 @@ object Dashcam {
         }
     }
 
+    /** Un renglón por segundo mientras dura el pedazo (se corta solo al empezar el siguiente). */
+    private fun escribirSubtitulos(f: File): Job = scope.launch(Dispatchers.IO) {
+        try {
+            f.bufferedWriter().use { w ->
+                var n = 0
+                val hora = SimpleDateFormat("HH:mm:ss", Locale.US)
+                while (isActive && n < SEGMENTO_MS / 1000 + 5) {
+                    w.write(DashcamTelemetria.bloque(n, Moto.rapida.value, UbicacionManager.posicionActual(), hora.format(Date())))
+                    w.flush()
+                    n++
+                    delay(1_000)
+                }
+            }
+        } catch (_: Exception) { }
+    }
+
     private fun detener() {
         corte?.cancel()
+        subtitulos?.cancel()
+        subtitulos = null
         val g = grabacion
         grabacion = null
         try { g?.stop() } catch (_: Exception) { }
@@ -202,9 +229,14 @@ object Dashcam {
     private fun limpiar() {
         val c = ctx ?: return
         scope.launch(Dispatchers.IO) {
-            val segs = File(c.filesDir, "dashcam").listFiles { f -> f.name.startsWith("seg_") }?.sortedBy { it.name } ?: return@launch
+            val dir = File(c.filesDir, "dashcam")
+            val segs = dir.listFiles { f -> f.name.startsWith("seg_") && f.name.endsWith(".mp4") }?.sortedBy { it.name } ?: return@launch
             val sobran = segs.size - minutos.value
-            if (sobran > 0) segs.take(sobran).forEach { it.delete() }
+            if (sobran > 0) segs.take(sobran).forEach { it.delete(); File(dir, it.name.removeSuffix(".mp4") + ".srt").delete() }
+            // .srt que se quedaron sin su video
+            dir.listFiles { f -> f.name.endsWith(".srt") }?.forEach { s ->
+                if (!File(dir, s.name.removeSuffix(".srt") + ".mp4").exists()) s.delete()
+            }
             actualizarUso()
         }
     }
@@ -231,12 +263,44 @@ object Dashcam {
         scope.launch {
             delay(1_500)        // que termine de cerrarse el pedazo actual
             val n = withContext(Dispatchers.IO) {
-                val segs = File(c.filesDir, "dashcam").listFiles { f -> f.name.startsWith("seg_") && f.length() > 1024 }
+                val dir = File(c.filesDir, "dashcam")
+                val segs = dir.listFiles { f -> f.name.startsWith("seg_") && f.name.endsWith(".mp4") && f.length() > 1024 }
                     ?.sortedBy { it.name }?.takeLast(3) ?: emptyList()
-                segs.count { copiarAGaleria(c, it) }
+                segs.count { v ->
+                    val ok = copiarAGaleria(c, v)
+                    val srt = File(dir, v.name.removeSuffix(".mp4") + ".srt")
+                    if (ok && srt.length() > 0) copiarSubtitulo(c, srt)
+                    ok
+                }
             }
             mensaje.value = if (n > 0) texto else "No hay video para guardar todavía"
         }
+    }
+
+    /** Junto al video (mismo nombre) para que el reproductor lo cargue solo; si Android no deja, en Documentos/FT150TS. */
+    private fun copiarSubtitulo(c: Context, f: File): Boolean {
+        val nombre = "FT150TS_" + f.name.removePrefix("seg_")
+        if (Build.VERSION.SDK_INT >= 29) {
+            for (carpeta in listOf(Environment.DIRECTORY_MOVIES, Environment.DIRECTORY_DOCUMENTS)) {
+                try {
+                    val valores = ContentValues().apply {
+                        put(MediaStore.MediaColumns.DISPLAY_NAME, nombre)
+                        put(MediaStore.MediaColumns.MIME_TYPE, "application/x-subrip")
+                        put(MediaStore.MediaColumns.RELATIVE_PATH, "$carpeta/FT150TS")
+                    }
+                    val r = c.contentResolver
+                    val uri = r.insert(MediaStore.Files.getContentUri("external"), valores) ?: continue
+                    r.openOutputStream(uri)?.use { out -> f.inputStream().use { it.copyTo(out) } }
+                    return true
+                } catch (_: Exception) { }
+            }
+            return false
+        }
+        return try {
+            val dir = File(c.getExternalFilesDir(Environment.DIRECTORY_MOVIES), "FT150TS").also { it.mkdirs() }
+            f.copyTo(File(dir, nombre), overwrite = true)
+            true
+        } catch (_: Exception) { false }
     }
 
     private fun copiarAGaleria(c: Context, f: File): Boolean = try {
@@ -260,4 +324,24 @@ object Dashcam {
         }
         true
     } catch (_: Exception) { false }
+}
+
+/** Formato SubRip: número, "00:00:01,000 --> 00:00:02,000", texto y renglón vacío. */
+object DashcamTelemetria {
+    private fun tiempo(s: Int) = "%02d:%02d:%02d,000".format(s / 3600, s / 60 % 60, s % 60)
+
+    fun texto(r: Rapida, pos: Pair<Double, Double>?, hora: String): String {
+        val partes = mutableListOf<String>()
+        partes += if (r.vel >= 0) "${r.vel.roundToInt()} km/h" else "-- km/h"
+        if (r.rpm >= 0) partes += "${r.rpm} rpm"
+        partes += when { r.marcha == 0 -> "N"; r.marcha > 0 -> "${r.marcha}a"; else -> "-" }
+        if (r.vMoto > 0) partes += "%.1f V".format(Locale.US, r.vMoto)
+        if (r.incl >= 0) partes += "${r.incl.roundToInt()}°"
+        val l1 = partes.joinToString("  ·  ")
+        val l2 = listOfNotNull(hora, pos?.let { "%.5f, %.5f".format(Locale.US, it.first, it.second) }).joinToString("  ·  ")
+        return l1 + "\n" + l2
+    }
+
+    fun bloque(n: Int, r: Rapida, pos: Pair<Double, Double>?, hora: String) =
+        "${n + 1}\n${tiempo(n)} --> ${tiempo(n + 1)}\n${texto(r, pos, hora)}\n\n"
 }

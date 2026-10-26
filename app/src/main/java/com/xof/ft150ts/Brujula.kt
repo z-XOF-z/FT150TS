@@ -45,7 +45,7 @@ object Brujula {
 
     fun iniciar(c: Context) {
         if (sm != null) return
-        sm = c.applicationContext.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(c)
         hay.value = sensor() != null
     }
 

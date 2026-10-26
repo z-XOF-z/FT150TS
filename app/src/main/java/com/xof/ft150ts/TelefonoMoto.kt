@@ -154,7 +154,7 @@ object TelefonoMoto {
             if (x.size == 3) MedidaRalenti(x[0].toLongOrNull() ?: 0L, x[1].toIntOrNull() ?: 0, x[2].toIntOrNull() ?: 0) else null
         }
         historialRalenti.value.lastOrNull()?.let { ralentiMedido.value = it.rpm; ralentiDesv.value = it.desv }
-        sm = app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(app)
         scope.launch { Moto.conexion.collect { revisar() } }
         scope.launch { Energia.enMoto.collect { revisar() } }
         scope.launch { ModoSueno.dormido.collect { revisar() } }
@@ -175,7 +175,11 @@ object TelefonoMoto {
      */
     private fun revisar() {
         // En reposo (parada y cargando) los sensores descansan: dar marcha corta la carga y los despierta
-        val enUso = (BleManager.primerPlano || Energia.enMoto.value) && !ModoSueno.dormido.value && !Reposo.enReposo.value
+        // Batería: con "motor solo con el cable" (de fábrica) no hay motor sin la moto, así que el acelerómetro a ~400 Hz
+        // solo trabaja en la moto. Antes corría siempre que la app estuviera en pantalla, y como es el launcher eso era
+        // todo el día (~18 % de CPU con el teléfono en la mesa).
+        val enMotoOLibre = Energia.enMoto.value || NfcMoto.presente.value || (BleManager.primerPlano && !soloConCable.value)
+        val enUso = enMotoOLibre && !ModoSueno.dormido.value && !Reposo.enReposo.value
         val rpm = activo.value && !tarjetaActiva() && (enUso || calibrando.value)
         val baches = Baches.activo.value && enUso
         necesitaRpm = rpm
@@ -202,13 +206,19 @@ object TelefonoMoto {
         h = handler
         // Lo más rápido que dé el sensor (con HIGH_SAMPLING_RATE_SENSORS pasa de 200/s)
         val periodo = max(acel.minDelay, 1000)
-        val ok = try { s.registerListener(oyente, acel, periodo, handler) } catch (_: Exception) { false }
+        // Por lotes: el chip del sensor junta las muestras (cada una con su tiempo exacto) y las entrega cada
+        // LOTE_US. Mismos datos, pero el hilo despierta ~10 veces por segundo en vez de ~600 (gasta mucho menos).
+        // El análisis corre cada 250 ms, así que no se nota; si el sensor no tiene FIFO, Android lo ignora.
+        val ok = try { s.registerListener(oyente, acel, periodo, LOTE_US, handler) } catch (_: Exception) { false }
         if (!ok) s.registerListener(oyente, acel, 5_000, handler)     // respaldo: 200 por segundo
-        if (giro != null) s.registerListener(oyente, giro, SensorManager.SENSOR_DELAY_GAME, handler)
+        if (giro != null) s.registerListener(oyente, giro, SensorManager.SENSOR_DELAY_GAME, LOTE_US, handler)
         handler.postDelayed(ciclo, 500)
         sensores.value = true
         UbicacionManager.arrancar()
     }
+
+    /** Cada cuánto entrega el sensor su lote de muestras (µs). */
+    private const val LOTE_US = 100_000
 
     private fun detener() {
         sm?.unregisterListener(oyente)
@@ -379,7 +389,7 @@ object TelefonoMoto {
         picoImpacto = 0f
         if (impacto > 35f && ahora - ultimoImpacto > 30_000) {
             ultimoImpacto = ahora
-            principal.post { Dashcam.protegerPorImpacto() }
+            principal.post { Dashcam.protegerPorImpacto(); Emergencia.impacto(vel) }
         }
         val u = Baches.umbral()
         if (Baches.activo.value && vel > 15f && pico > u && ahora - ultimoBache > 1_000) {

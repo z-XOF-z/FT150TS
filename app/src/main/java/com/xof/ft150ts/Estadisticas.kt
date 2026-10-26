@@ -88,7 +88,7 @@ object Estadisticas {
         guardar(true)
     }
 
-    /** Cada dato rápido de la moto (o del modo demo). */
+    /** Cada dato rápido de la moto (el modo demo no llama aquí: sus datos no cuentan para tu viaje ni tus récords). */
     fun muestra(r: Rapida) {
         val ahoraRt = SystemClock.elapsedRealtime()
         val ahora = System.currentTimeMillis()

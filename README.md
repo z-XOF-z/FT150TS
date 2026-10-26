@@ -15,7 +15,7 @@ y está listo para una tarjeta **ESP32** en la moto.
 [![ESP32-S3][esp32-shield]](firmware/ft150ts_dashboard)
 [![Versión][version-shield]](LEEME.md)
 
-### [⬇ Descargar la app (APK v3.0)](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v3.0.apk)
+### [⬇ Descargar la app (APK v3.4 estable)](https://github.com/z-XOF-z/FT150TS/releases/latest)
 
 **[Qué hace](#qué-hace)** · **[Empezar](#empezar)** · **[La tarjeta ESP32](#la-tarjeta-esp32)** · **[Historial completo](LEEME.md)**
 
@@ -66,8 +66,11 @@ directas) y la app se cambia sola.
 
 ### 1. Instala la app
 
-**La rápida:** descarga [`FT150TS-v3.0.apk`](https://github.com/z-XOF-z/FT150TS/raw/main/releases/FT150TS-v3.0.apk) en tu
+**La rápida:** descarga el APK del [último release](https://github.com/z-XOF-z/FT150TS/releases/latest) en tu
 teléfono (Android 8.0 o más nuevo), ábrelo y permite "Instalar apps desconocidas".
+
+**Actualizar:** desde la 3.2-beta.1, en la app: Ajustes → Acerca de → **Buscar actualización** (prende "Versiones de prueba" para recibir betas). Se instala encima sin
+borrar tus datos. Detalles y cómo publicar una versión en [docs/RELEASE.md](docs/RELEASE.md).
 
 **Desde el código:**
 
@@ -152,4 +155,4 @@ Hecho por **XOF** para su Italika FT150TS.
 [kotlin-shield]: https://img.shields.io/badge/Kotlin-2.1-9BE22B?style=for-the-badge&logo=kotlin&logoColor=white&labelColor=0E1113
 [compose-shield]: https://img.shields.io/badge/Jetpack%20Compose-Material%203-9BE22B?style=for-the-badge&logo=jetpackcompose&logoColor=white&labelColor=0E1113
 [esp32-shield]: https://img.shields.io/badge/ESP32--S3-firmware-9BE22B?style=for-the-badge&logo=espressif&logoColor=white&labelColor=0E1113
-[version-shield]: https://img.shields.io/badge/versi%C3%B3n-3.0-9BE22B?style=for-the-badge&labelColor=0E1113
+[version-shield]: https://img.shields.io/badge/versi%C3%B3n-3.4-9BE22B?style=for-the-badge&labelColor=0E1113

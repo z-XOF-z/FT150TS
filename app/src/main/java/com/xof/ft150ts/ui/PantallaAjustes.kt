@@ -39,6 +39,8 @@ import androidx.compose.material3.SliderDefaults
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableLongStateOf
@@ -57,6 +59,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.DrawScope
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.StrokeJoin
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -76,6 +79,7 @@ import com.xof.ft150ts.Energia
 import com.xof.ft150ts.EstimadorMarcha
 import com.xof.ft150ts.EstiloMapa
 import com.xof.ft150ts.EstiloTablero
+import com.xof.ft150ts.Estilos
 import com.xof.ft150ts.Gpx
 import com.xof.ft150ts.Lanzador
 import com.xof.ft150ts.Luz
@@ -85,12 +89,15 @@ import com.xof.ft150ts.Moto
 import com.xof.ft150ts.MusicaManager
 import com.xof.ft150ts.NfcMoto
 import com.xof.ft150ts.NivelCalor
+import com.xof.ft150ts.ModoRendimiento
+import com.xof.ft150ts.NivelRendimiento
 import com.xof.ft150ts.Pantalla
 import com.xof.ft150ts.PantallaEncendida
 import com.xof.ft150ts.Reposo
 import com.xof.ft150ts.Root
 import com.xof.ft150ts.TelefonoMoto
 import com.xof.ft150ts.TemaApp
+import com.xof.ft150ts.TIPOS_ARRANQUE
 import com.xof.ft150ts.Termico
 import com.xof.ft150ts.UbicacionManager
 import com.xof.ft150ts.Voz
@@ -105,32 +112,44 @@ import kotlinx.coroutines.launch
  */
 @Composable
 fun PantallaAjustes(onAccesoNotif: () -> Unit, onVerInicio: () -> Unit) {
-    Column(
-        Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(12.dp),
+    // Rendimiento: LazyColumn, solo se arman las secciones que se ven. Antes las 19 secciones estaban armadas siempre y
+    // Compose recorría ese árbol enorme en cada cuadro de cualquier cambio de pestaña (era parte del tirón al deslizar).
+    LazyColumn(
+        Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        // En horizontal no se estira de lado a lado: queda una columna cómoda al centro
-        Column(Modifier.widthIn(max = 600.dp).fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            SeccionApariencia()
-            SeccionPantalla()
-            SeccionPid()
-            SeccionCalor()
-            SeccionMapa()
-            SeccionAvisos()
-            SeccionLluviaRuta()
-            SeccionVoz()
-            SeccionLauncher()
-            SeccionModoMoto()
-            SeccionSinTarjeta()
-            SeccionDashcam()
-            SeccionRoot()
-            SeccionConexion(onAccesoNotif)
-            SeccionRuta()
-            SeccionRespaldo()
-            SeccionAcercaDe(onVerInicio)
-            Spacer(Modifier.heightIn(min = 24.dp))
-        }
+        item { Ancho { SeccionApariencia() } }
+        item { Ancho { SeccionPantalla() } }
+        item { Ancho { SeccionPid() } }
+        item { Ancho { SeccionCalor() } }
+        item { Ancho { SeccionMapa() } }
+        item { Ancho { SeccionAvisos() } }
+        item { Ancho { SeccionLluviaRuta() } }
+        item { Ancho { SeccionRutinas() } }
+        item { Ancho { SeccionBluetoothAudio() } }
+        item { Ancho { SeccionVoz() } }
+        item { Ancho { SeccionLauncher() } }
+        item { Ancho { SeccionModoMoto() } }
+        item { Ancho { SeccionAhorroNocturno() } }
+        item { Ancho { SeccionSos() } }
+        item { Ancho { SeccionSinTarjeta() } }
+        item { Ancho { SeccionDashcam() } }
+        item { Ancho { SeccionFuncionesAvanzadas() } }
+        item { Ancho { SeccionRoot() } }
+        item { Ancho { SeccionConexion(onAccesoNotif) } }
+        item { Ancho { SeccionRuta() } }
+        item { Ancho { SeccionRespaldo() } }
+        item { Ancho { SeccionAcercaDe(onVerInicio) } }
+        item { Spacer(Modifier.heightIn(min = 24.dp)) }
     }
+}
+
+/** En horizontal no se estira de lado a lado: queda una columna cómoda al centro. */
+@Composable
+private fun Ancho(contenido: @Composable () -> Unit) {
+    Box(Modifier.widthIn(max = 600.dp).fillMaxWidth()) { contenido() }
 }
 
 // ------------------------------------------------------------
@@ -189,10 +208,54 @@ private fun SeccionApariencia() {
                 Modifier.weight(1f),
             ) { vistaCircuito(Paleta.lima) }
             OpcionVisual(
-                "Vértice", "Riel lateral y losas · nuevo",
+                "Vértice", "Riel lateral y losas",
                 Apariencia.tema == TemaApp.VERTICE, { Apariencia.ponerTema(TemaApp.VERTICE) },
                 Modifier.weight(1f),
             ) { vistaVertice(Paleta.lima) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Tinta", "Viñetas de cómic · nuevo",
+                Apariencia.tema == TemaApp.TINTA, { Apariencia.ponerTema(TemaApp.TINTA) },
+                Modifier.weight(1f),
+            ) { vistaTinta(Paleta.lima) }
+            Spacer(Modifier.weight(2f).padding(5.dp))
+        }
+
+        Subtitulo("Estilos · nuevo (v3.4)")
+        Estilos.TODOS.chunked(3).forEach { fila ->
+            Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                fila.forEach { e ->
+                    val t = TemaApp.valueOf(e.id)
+                    OpcionVisual(e.nombre, e.detalle, Apariencia.tema == t, { Apariencia.ponerTema(t) }, Modifier.weight(1f)) { vistaEstilo(e) }
+                }
+                repeat(3 - fila.size) { Spacer(Modifier.weight(1f)) }
+            }
+        }
+        val mezcla = Estilos.mezcla(Apariencia.semillaMezcla)
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+            OpcionVisual(
+                "Mezcla · ${mezcla.nombre}", "Un tema distinto cada vez",
+                Apariencia.tema == TemaApp.MEZCLA, { Apariencia.ponerTema(TemaApp.MEZCLA) }, Modifier.weight(1f),
+            ) { vistaEstilo(mezcla) }
+            Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                BotonDeportivo("Otra mezcla", { Apariencia.otraMezcla() }, Modifier.fillMaxWidth())
+                Text("Combina paleta, forma, adorno y fondo al azar: hay miles de combinaciones. Si te gusta una, quédate en ella.",
+                    color = Paleta.textoSec, fontSize = 11.sp)
+            }
+        }
+        if (estiloTema != null) {
+            Text(estiloTema!!.origen, color = Paleta.textoSec, fontSize = 11.sp)
+            FilaSwitch("Usar el color del tema", "Cada estilo trae su acento; apágalo para usar el color de acento que elijas abajo",
+                Apariencia.acentoDelTema) { Apariencia.ponerAcentoDelTema(it) }
+        }
+        if (Apariencia.tema == TemaApp.TINTA) {
+            Text(
+                "Tinta: cada tarjeta es una viñeta de historieta con contorno de tinta, sombra sólida del color de acento " +
+                    "y trama de puntos; de fondo, líneas de velocidad. Se ve mejor con acentos fuertes (rojo, amarillo, " +
+                    "cian) y con el efecto neón apagado.",
+                color = Paleta.textoSec, fontSize = 11.sp,
+            )
         }
         if (Apariencia.tema == TemaApp.VERTICE) {
             Text(
@@ -205,9 +268,21 @@ private fun SeccionApariencia() {
 
         FilaSwitch("Efecto neón", "Brillo alrededor de las tarjetas, la barra de arriba, el marco y la barra de RPM",
             Apariencia.neon) { Apariencia.ponerNeon(it) }
-        FilaSwitch("Animación al entrar al tablero",
-            "Como una moto al dar switch: una franja a 45° barre la pantalla, las RPM suben al tope y regresan y los dígitos marcan 888",
+        Subtitulo("Pantalla de inicio")
+        Selector(com.xof.ft150ts.INICIOS, Apariencia.estiloInicio, { Apariencia.ponerEstiloInicio(it) }, Modifier.fillMaxWidth())
+        Text("La que sale al abrir la app. Las neón toman el color del tablero Neón que elijas (verde si usas otro).",
+            color = Paleta.textoSec, fontSize = 11.sp)
+        FilaSwitch("Animación al abrir el switch",
+            "Sale en el tablero solo cuando abres el switch de la moto (el cable empieza a cargar), no al cambiar de pestaña. " +
+                "Las RPM suben al tope y regresan y los dígitos marcan 888",
             Apariencia.animEntrada) { Apariencia.ponerAnimEntrada(it) }
+        if (Apariencia.animEntrada) {
+            Selector(TIPOS_ARRANQUE, Apariencia.tipoArranque, { Apariencia.ponerTipoArranque(it) }, Modifier.fillMaxWidth())
+            BotonDeportivo("Probar animación", {
+                Lanzador.pedirArranque()
+                Lanzador.irA(com.xof.ft150ts.PAGINA_TABLERO)
+            }, Modifier.fillMaxWidth(), primario = false, tamanoTexto = 13.sp)
+        }
 
         Subtitulo("Fondo")
         Selector(listOf("Puntos", "Rejilla", "Rayas 45°", "Negro"), Apariencia.fondo, { Apariencia.ponerFondo(it) }, Modifier.fillMaxWidth())
@@ -240,6 +315,44 @@ private fun SeccionApariencia() {
         }
 
         Subtitulo("Estilo del tablero")
+        FilaSwitch("Tableros con mi color de acento",
+            "Racing Morado, Telemetría Morada y Dual Neón toman el tono de tu color de acento (con sus mismos brillos). " +
+                "Las alertas siguen en rojo y la batería en verde. Apagado: exactos como tus conceptos.",
+            Apariencia.tablerosConAcento) { Apariencia.ponerTablerosConAcento(it) }
+        // v3.10: recreación fiel del concepto morado de Andrew
+        OpcionVisual(
+            "Racing Morado", "Tu concepto: 145 · 3 GEAR · pantalla completa · nuevo",
+            Apariencia.estiloTablero == EstiloTablero.MORADO, { Apariencia.ponerEstiloTablero(EstiloTablero.MORADO) },
+            Modifier.fillMaxWidth(),
+        ) { vistaMorado() }
+        OpcionVisual(
+            "Telemetría Morada", "Tu concepto: 168 · 5 · radar G y tu ruta · nuevo",
+            Apariencia.estiloTablero == EstiloTablero.TELEMETRIA_MORADA, { Apariencia.ponerEstiloTablero(EstiloTablero.TELEMETRIA_MORADA) },
+            Modifier.fillMaxWidth(),
+        ) { vistaTelemetriaMorada() }
+        OpcionVisual(
+            "Dual Neón", "Tu concepto: hexágono cian, gasolina roja, PRCXE / LAUNCH · nuevo",
+            Apariencia.estiloTablero == EstiloTablero.DUAL_NEON, { Apariencia.ponerEstiloTablero(EstiloTablero.DUAL_NEON) },
+            Modifier.fillMaxWidth(),
+        ) { vistaDualNeon() }
+        // Familia "instrumento": como el LCD Sport, todo dibujado como un display de verdad
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Race LCD", "Superbike: escalera y modo carrera",
+                Apariencia.estiloTablero == EstiloTablero.RACE, { Apariencia.ponerEstiloTablero(EstiloTablero.RACE) },
+                Modifier.weight(1f),
+            ) { vistaRaceLcd(Paleta.lima, Paleta.rpmAlta) }
+            OpcionVisual(
+                "VFD 85", "Fluorescente ochentero",
+                Apariencia.estiloTablero == EstiloTablero.VFD, { Apariencia.ponerEstiloTablero(EstiloTablero.VFD) },
+                Modifier.weight(1f),
+            ) { vistaVfd(Paleta.lima) }
+            OpcionVisual(
+                "Anillo", "Bisel de 60 segmentos",
+                Apariencia.estiloTablero == EstiloTablero.ANILLO, { Apariencia.ponerEstiloTablero(EstiloTablero.ANILLO) },
+                Modifier.weight(1f),
+            ) { vistaAnillo(Paleta.lima, Paleta.rpmAlta) }
+        }
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             OpcionVisual(
                 "LCD Sport", "Segmentos, negro AMOLED",
@@ -251,7 +364,65 @@ private fun SeccionApariencia() {
                 Apariencia.estiloTablero == EstiloTablero.CLASICO, { Apariencia.ponerEstiloTablero(EstiloTablero.CLASICO) },
                 Modifier.weight(1f),
             ) { vistaClasico(Paleta.lima, Paleta.rpmAlta) }
+            OpcionVisual(
+                "Pista", "RPM tipo MotoGP · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.PISTA, { Apariencia.ponerEstiloTablero(EstiloTablero.PISTA) },
+                Modifier.weight(1f),
+            ) { vistaPista(Paleta.lima, Paleta.rpmAlta) }
         }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Minimal", "Solo lo esencial · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.MINIMAL, { Apariencia.ponerEstiloTablero(EstiloTablero.MINIMAL) },
+                Modifier.weight(1f),
+            ) { vistaMinimal(Paleta.lima) }
+            OpcionVisual(
+                "Telemetría", "Gráfica de 60 s · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.TELEMETRIA, { Apariencia.ponerEstiloTablero(EstiloTablero.TELEMETRIA) },
+                Modifier.weight(1f),
+            ) { vistaTelemetria(Paleta.lima, Paleta.rpmAlta) }
+            OpcionVisual(
+                "Bento", "Mosaico de tarjetas · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.BENTO, { Apariencia.ponerEstiloTablero(EstiloTablero.BENTO) },
+                Modifier.weight(1f),
+            ) { vistaBento(Paleta.lima) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Superbike", "TFT de moto deportiva · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.SUPERBIKE, { Apariencia.ponerEstiloTablero(EstiloTablero.SUPERBIKE) },
+                Modifier.weight(1f),
+            ) { vistaSuperbike(Paleta.lima, Paleta.rpmAlta) }
+            OpcionVisual(
+                "F1", "Volante con 15 LEDs · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.F1, { Apariencia.ponerEstiloTablero(EstiloTablero.F1) },
+                Modifier.weight(1f),
+            ) { vistaF1(Paleta.rpmBaja, Paleta.rpmMedia, Paleta.rpmAlta) }
+            OpcionVisual(
+                "Arrancón", "RPM vertical y tus tiempos · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.ARRANCON, { Apariencia.ponerEstiloTablero(EstiloTablero.ARRANCON) },
+                Modifier.weight(1f),
+            ) { vistaArrancon(Paleta.lima, Paleta.rpmAlta) }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+            OpcionVisual(
+                "Rally", "Brújula, roadbook y altitud · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.RALLY, { Apariencia.ponerEstiloTablero(EstiloTablero.RALLY) },
+                Modifier.weight(1f),
+            ) { vistaRally(Paleta.lima) }
+            OpcionVisual(
+                "Arcade", "Dígitos de 7 segmentos · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.ARCADE, { Apariencia.ponerEstiloTablero(EstiloTablero.ARCADE) },
+                Modifier.weight(1f),
+            ) { vistaArcade(Paleta.lima, Paleta.rpmAlta) }
+            OpcionVisual(
+                "Universal", "Como el digital de Italika · nuevo",
+                Apariencia.estiloTablero == EstiloTablero.UNIVERSAL, { Apariencia.ponerEstiloTablero(EstiloTablero.UNIVERSAL) },
+                Modifier.weight(1f),
+            ) { vistaUniversal() }
+        }
+        Text("El tablero es independiente del tema: cambia solo el diseño, tus colores se quedan. " +
+            "Atajo: mantén presionado el tablero para pasar al siguiente.", color = Paleta.textoSec, fontSize = 11.sp)
         Subtitulo("Barra de RPM del LCD")
         Selector(listOf("Según el tema", "Curva", "Diagonal 45°"), Apariencia.barraRpm, { Apariencia.ponerBarraRpm(it) }, Modifier.fillMaxWidth())
         Text("Curva: sube redondeado y sigue recta. Diagonal 45°: sube en línea recta a 45°, con bloques inclinados y un riel " +
@@ -692,6 +863,37 @@ private fun DrawScope.vistaVertice(acento: Color) {
     losa(w * 0.68f, h * 0.56f, w * 0.28f, h * 0.36f)
 }
 
+/** Tinta: líneas de velocidad, trama de puntos y tres viñetas con contorno de tinta y sombra del acento. */
+private fun DrawScope.vistaTinta(acento: Color) {
+    val w = size.width; val h = size.height
+    val r = java.util.Random(7)
+    val fx = -w * 0.1f; val fy = h * 0.45f
+    repeat(22) {
+        val a = Math.toRadians(-35.0 + r.nextDouble() * 70.0)
+        val d0 = w * (0.3f + r.nextFloat() * 0.3f)
+        drawLine(Color.White.copy(alpha = 0.10f), Offset(fx + d0 * Math.cos(a).toFloat(), fy + d0 * Math.sin(a).toFloat()),
+            Offset(fx + w * 1.6f * Math.cos(a).toFloat(), fy + w * 1.6f * Math.sin(a).toFloat()), 1.2f)
+    }
+    var y = h * 0.6f
+    while (y < h) { var x = w * 0.6f; while (x < w) { drawCircle(acento.copy(alpha = 0.18f), 2.2f * ((x - w * 0.6f) / (w * 0.4f) + 0.2f), Offset(x, y)); x += 7f }; y += 7f }
+    val tintaC = Color(0xFFF2F0EA)
+    fun vineta(lx: Float, ly: Float, lw: Float, lh: Float) {
+        val caida = lh * 0.06f
+        val p = Path().apply { moveTo(lx, ly); lineTo(lx + lw, ly + caida); lineTo(lx + lw, ly + lh); lineTo(lx, ly + lh - caida * 0.6f); close() }
+        val s = Path().apply { addPath(p, Offset(4f, 4f)) }
+        drawPath(s, acento)
+        drawPath(p, Color(0xFF111111))
+        drawPath(p, tintaC, style = Stroke(2.5f, join = StrokeJoin.Miter))
+        for (i in 0 until 4) for (j in 0 until 3) {
+            val k = 1f - (i * 0.2f + j * 0.25f)
+            if (k > 0.1f) drawCircle(tintaC.copy(alpha = 0.4f), 1.6f * k, Offset(lx + lw - 6f - i * 5f, ly + 7f + j * 5f))
+        }
+    }
+    vineta(w * 0.05f, h * 0.10f, w * 0.48f, h * 0.78f)
+    vineta(w * 0.58f, h * 0.10f, w * 0.36f, h * 0.36f)
+    vineta(w * 0.58f, h * 0.54f, w * 0.36f, h * 0.34f)
+}
+
 private fun DrawScope.vistaVidrio(acento: Color, segundo: Color) {
     val w = size.width; val h = size.height
     drawRect(Brush.radialGradient(listOf(acento.copy(alpha = 0.55f), Color.Transparent), Offset(w * 0.15f, h * 0.1f), w * 0.55f))
@@ -814,6 +1016,21 @@ private fun SeccionPantalla() {
             else "Tu pantalla trabaja a 60 Hz",
             Apariencia.fluidez,
         ) { Apariencia.ponerFluidez(it) }
+        val rendActivo by ModoRendimiento.activo.collectAsStateWithLifecycle()
+        val rendNivel by ModoRendimiento.nivel.collectAsStateWithLifecycle()
+        val rendSoportado by ModoRendimiento.soportado.collectAsStateWithLifecycle()
+        FilaSwitch(
+            "Modo rendimiento (root)",
+            when {
+                !rendSoportado -> "Este teléfono no deja cambiar cómo reparte el trabajo el procesador"
+                rendNivel == NivelRendimiento.CARPLAY -> "Activo: núcleos grandes y GPU más alta con CarPlay"
+                rendNivel == NivelRendimiento.TABLERO -> "Activo: la app corre en los núcleos grandes del procesador"
+                else -> "Con el tablero en pantalla la app corre en los núcleos grandes y, con CarPlay, la GPU sube " +
+                    "un escalón: cuadros a la mitad del tiempo. Se apaga solo con la pantalla apagada, en reposo o " +
+                    "con el teléfono caliente (43 °C)"
+            },
+            rendActivo,
+        ) { ModoRendimiento.ponerActivo(it) }
     }
 }
 
@@ -1177,6 +1394,51 @@ private fun SeccionModoMoto() {
                 BotonDeportivo("Dar permiso \"Mostrar sobre otras apps\"", { Energia.pedirAbrirseSola(ctx) },
                     Modifier.fillMaxWidth(), tamanoTexto = 12.sp)
             }
+            val musicaSw by com.xof.ft150ts.Encendido.musica.collectAsStateWithLifecycle()
+            val saludoSw by com.xof.ft150ts.Encendido.saludo.collectAsStateWithLifecycle()
+            FilaSwitch("Música con el switch",
+                "Al apagar la moto se atenúa y luego se pausa; si la prendes en menos de 30 min, sigue donde iba",
+                musicaSw) { com.xof.ft150ts.Encendido.ponerMusica(it) }
+            if (musicaSw) {
+                val aten by com.xof.ft150ts.Encendido.atenuarSeg.collectAsStateWithLifecycle()
+                val opcionesAt = listOf(0, 15, 30, 60)
+                Selector(listOf("Pausar ya", "15 s bajita", "30 s bajita", "1 min bajita"), opcionesAt.indexOf(aten).coerceAtLeast(0),
+                    { com.xof.ft150ts.Encendido.ponerAtenuar(opcionesAt[it]) }, Modifier.fillMaxWidth())
+                Text("Al cerrar el switch la música baja suave y sigue bajita ese tiempo; luego se pausa. Si abres antes, regresa.",
+                    color = Paleta.textoSec, fontSize = 12.sp)
+            }
+            FilaSwitch("Saludo por voz al prender",
+                "Si la moto estuvo apagada un rato: la temperatura, si va a llover y si te queda poca gasolina",
+                saludoSw) { com.xof.ft150ts.Encendido.ponerSaludo(it) }
+            // Zona Wi-Fi con el switch (root): CarPlay inalámbrico necesita la zona del teléfono prendida
+            val zonaSw by com.xof.ft150ts.ZonaWifi.activo.collectAsStateWithLifecycle()
+            val zonaMia by com.xof.ft150ts.ZonaWifi.soloLaMia.collectAsStateWithLifecycle()
+            val zonaEspera by com.xof.ft150ts.ZonaWifi.espera.collectAsStateWithLifecycle()
+            val zonaEstado by com.xof.ft150ts.ZonaWifi.prendida.collectAsStateWithLifecycle()
+            val zonaEvento by com.xof.ft150ts.ZonaWifi.evento.collectAsStateWithLifecycle()
+            val rootOk = com.xof.ft150ts.Root.disponible.collectAsStateWithLifecycle().value == true
+            FilaSwitch("Zona Wi-Fi con el switch",
+                "Al abrir el switch prende tu zona Wi-Fi (para CarPlay); al cerrarlo la apaga después de la espera. Requiere root",
+                zonaSw) { com.xof.ft150ts.ZonaWifi.ponerActivo(it) }
+            if (zonaSw) {
+                if (!rootOk) Text("Sin root no se puede prender la zona sola: activa root en Ajustes > Root.", color = Paleta.ambar, fontSize = 12.sp)
+                val esperas = listOf(30, 60, 120, 300)
+                Selector(listOf("30 s", "1 min", "2 min", "5 min"), esperas.indexOf(zonaEspera).coerceAtLeast(0),
+                    { com.xof.ft150ts.ZonaWifi.ponerEspera(esperas[it]) }, Modifier.fillMaxWidth())
+                Text("Espera al cerrar el switch: si lo vuelves a abrir antes, la zona sigue prendida.", color = Paleta.textoSec, fontSize = 12.sp)
+                FilaSwitch("Solo apagar la que prendió la app",
+                    "Si tú la prendiste a mano (para compartir internet), el switch no la apaga", zonaMia) {
+                    com.xof.ft150ts.ZonaWifi.ponerSoloLaMia(it)
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    BotonDeportivo("Prender", { com.xof.ft150ts.ZonaWifi.probar(true) }, Modifier.weight(1f), primario = false, tamanoTexto = 12.sp)
+                    BotonDeportivo("Apagar", { com.xof.ft150ts.ZonaWifi.probar(false) }, Modifier.weight(1f), primario = false, tamanoTexto = 12.sp)
+                }
+                Text("Zona: " + when (zonaEstado) { true -> "prendida"; false -> "apagada"; null -> "sin revisar" } +
+                    if (zonaEvento.isNotBlank()) " · $zonaEvento" else "", color = Paleta.textoSec, fontSize = 12.sp)
+            }
+            Text("Si se corta la carga mientras vas rodando (cable flojo), el tablero no se va a tus apps: te avisa y " +
+                "espera a que te detengas.", color = Paleta.textoSec, fontSize = 12.sp)
             FilaSwitch("Al quitarlo, mostrar tus apps",
                 "Al apagar la moto o quitar el teléfono del soporte pasa a la página de apps", alQuitar) {
                 Energia.ponerAlQuitarApps(it)
@@ -1842,6 +2104,7 @@ private fun SeccionAcercaDe(onVerInicio: () -> Unit) {
             modifier = Modifier.fillMaxWidth().padding(top = 4.dp),
         )
         BotonDeportivo("Ver animación de inicio", onVerInicio, Modifier.fillMaxWidth(), primario = false, tamanoTexto = 13.sp)
+        BloqueActualizar()
     }
 }
 

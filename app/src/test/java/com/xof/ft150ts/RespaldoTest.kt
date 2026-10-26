@@ -42,6 +42,31 @@ class RespaldoTest {
     }
 
     @Test
+    fun elRegistroDelAhorroNocturnoNoSeRestaura() {
+        // Un registro ajeno diría "regresa los datos/Wi-Fi/grupos" sobre cosas que este teléfono nunca cambió
+        val prefs = JSONObject()
+            .put(Nocturno.PREFS_REGISTRO, JSONObject().put("aplicada", par("b", true)).put("cambios", par("s", "[]")))
+            .put("nocturno", JSONObject().put("activo", par("b", true)).put("inicio", par("i", 0)))
+        val (ajustes, _) = Respaldo.revisarRespaldo(respaldo(prefs))
+        assertFalse(ajustes.containsKey(Nocturno.PREFS_REGISTRO))
+        // El horario y las opciones sí viajan
+        assertEquals(Respaldo.Valor.B(true), ajustes["nocturno"]!!["activo"])
+    }
+
+    @Test
+    fun lasFirmasConfiablesDeDiPlayNoSeRestauran() {
+        // Un respaldo ajeno no debe poder hacer pasar otra app por DiPlay (dibujaría dentro del mapa)
+        val firma = "a".repeat(64)
+        val prefs = JSONObject()
+            .put(CarPlay.PREFS_CONFIANZA, JSONObject().put("firmas", par("ss", JSONArray().put(firma))))
+            .put("carplay", JSONObject().put("enMapa", par("b", true)))
+        val (ajustes, _) = Respaldo.revisarRespaldo(respaldo(prefs))
+        assertFalse(ajustes.containsKey(CarPlay.PREFS_CONFIANZA))
+        // La preferencia de ver CarPlay en el mapa sí viaja en el respaldo
+        assertEquals(Respaldo.Valor.B(true), ajustes["carplay"]!!["enMapa"])
+    }
+
+    @Test
     fun nombresDeAjustesRarosSeIgnoran() {
         val prefs = JSONObject()
             .put("../../shared_prefs/otro", JSONObject().put("x", par("b", true)))

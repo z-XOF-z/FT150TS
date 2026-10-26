@@ -32,6 +32,7 @@ class MainActivity : ComponentActivity() {
         UbicacionManager.arrancar()
         BleManager.conectar()
         AudioSalida.conectarPerfiles()
+        BluetoothAdmin.registrar()
         ServicioMoto.arrancar(this)       // ya con permiso de Bluetooth/ubicación
     }
 
@@ -102,6 +103,8 @@ class MainActivity : ComponentActivity() {
             val nivelCalor by Termico.nivel.collectAsStateWithLifecycle()
             // En reposo también baja a 60 Hz: nada se mueve en pantalla, no hace falta más
             val fluidez = Apariencia.fluidez && !protegiendo && !reposo
+            // (Probado en v3.9: pedir 60 Hz con CarPlay en la pestaña no sirve. La capa del video de DiPlay no pide Hz
+            // y HyperOS entonces pone el máximo, aunque la app pida 60 y aunque se cambie el ajuste del sistema.)
             LaunchedEffect(fluidez) { Pantalla.aplicar(this@MainActivity, fluidez) }
             val brillo = brilloMax && !(protegiendo && nivelCalor == NivelCalor.MUY_CALIENTE)
             // Reloj de reposo: brillo mínimo (en AMOLED casi todo el panel queda apagado)
@@ -155,18 +158,38 @@ class MainActivity : ComponentActivity() {
         Luz.arrancar()
         Dashcam.adjuntar(this)
         BleManager.primerPlano = true
+        Lanzador.actividadVisible = true
+        Root.permisosHyperOS(this)          // HyperOS los quita tras actualizar: se revisan al mostrarse
         BleManager.conectar()
         ServicioMoto.arrancar(this)    // vuelve a poner el servicio con permiso de ubicación (GPS con pantalla apagada)
     }
 
     override fun onResume() {
         super.onResume()
+        quitarBloqueoSiSePuede()
         aplicarBarras(Apariencia.barras)   // al regresar de otra app Android las vuelve a mostrar
         NfcMoto.habilitar(this)
         MusicaManager.refrescar()
         UbicacionManager.arrancar()
         AudioSalida.apagarMicBt()      // por si se quedó encendido el micrófono del casco
         AudioSalida.refrescar()
+    }
+
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (!hasFocus) CarPlayPestana.alPerderFoco() else quitarBloqueoSiSePuede()
+    }
+
+    /**
+     * Con el tablero encima de la pantalla de bloqueo, el bloqueo sigue debajo: CarPlay (DiPlay) no aparece y no se
+     * puede deslizar. Si el bloqueo es solo "deslizar" (sin PIN, patrón ni huella) se le pide a Android que lo quite
+     * (API oficial requestDismissKeyguard). Con PIN no se salta nada: queda como está y Android lo pide al abrir otra app.
+     */
+    private fun quitarBloqueoSiSePuede() {
+        if (Build.VERSION.SDK_INT < 26) return
+        val km = getSystemService(android.app.KeyguardManager::class.java) ?: return
+        if (!km.isKeyguardLocked || km.isKeyguardSecure) return
+        try { km.requestDismissKeyguard(this, null) } catch (_: Exception) { }
     }
 
     override fun onPause() {
@@ -180,6 +203,7 @@ class MainActivity : ComponentActivity() {
         Luz.detener()
         Dashcam.soltar()
         BleManager.primerPlano = false
+        Lanzador.actividadVisible = false
         // Sin pantalla el GPS solo sigue prendido si le está prestando ubicación a la moto
         // (o si el teléfono está haciendo de sensor de la moto: necesita la velocidad)
         if (!(BleManager.conectado() && Moto.enviarGps.value) && !TelefonoMoto.trabajando.value) UbicacionManager.pausar()

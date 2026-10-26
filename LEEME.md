@@ -15,11 +15,31 @@ en los ajustes de Bluetooth: la app la busca y se conecta sola.
    límite de velocidad y nombre de la calle, clima, "¿dónde dejé la moto?" (botón P),
    micrófono para comandos de voz, botón "Navegar" (Google Maps), audífonos/casco con
    su batería, música (buscar, cola, apps, volumen) y lo esencial de la moto.
+   **CarPlay (botón CP):** con [DiPlay](https://github.com/shihabal3amri/DiPlay) instalado, la pantalla completa de
+   CarPlay se abre en ventana sobre el mapa, en pantalla dividida, en pantalla completa o como mapa incrustado (v3.3).
+   Detalles en [docs/CARPLAY.md](docs/CARPLAY.md).
+   **SOS por caída (v3.3):** aviso por SMS con tu ubicación si te caes ([docs/SOS.md](docs/SOS.md)).
 3. **Moto**: viaje y odómetro, estadísticas (gráficas de velocidad y RPM), mantenimiento
    (botón "Hecho" para registrar servicio), perfil ECO/SPORT, corte de motor y consola.
 4. **Ajustes** (engrane): apariencia, pantalla, mapa, avisos, voz y asistente, conexión, ruta y acerca de.
+   **Ahorro nocturno (v3.2):** horario de ahorro (00:00–06:30 de fábrica) con perfil conservador o extremo, todo
+   reversible y sin apagar el teléfono. Detalles en [docs/AHORRO_NOCTURNO.md](docs/AHORRO_NOCTURNO.md).
 
 Gira el teléfono a horizontal y las pantallas se acomodan solas.
+
+## Novedades v3.4 — CarPlay en la pestaña, 12 estilos y el switch más listo
+
+- **CarPlay en la pestaña Auto** (con DiPlay y root): ocupa la pestaña debajo de tus pestañas, se esconde al deslizar
+  sin cortar la sesión y regresa en ~0.3 s. Sin la píldora de HyperOS abajo. Ver [docs/CARPLAY.md](docs/CARPLAY.md).
+- **12 estilos nuevos** (Aurora, Bloque, Arcilla, Cyber, Synth, Suizo, Bento, Noche roja, Orgánico, Memphis, Art
+  Déco, Pista) y **Mezcla**: un tema nuevo con cada toque. Además el tema Tinta.
+- **Animación al abrir el switch:** sale solo al prender la moto. 5 tipos (Barrido 45°, CRT, Escáner, Pulso,
+  Píxeles) o al azar.
+- **Cable flojo:** si se corta la carga rodando, el tablero se queda y avisa. **Música con el switch** (pausa y
+  sigue) y **saludo por voz** opcional.
+- **SOS por caída** ([docs/SOS.md](docs/SOS.md)), **ahorro nocturno con root**
+  ([docs/AHORRO_NOCTURNO.md](docs/AHORRO_NOCTURNO.md)) y **actualizar desde la app** (canal beta opcional).
+- **Más rápida:** −32 % de CPU con la app quieta (medido en un POCO F4).
 
 ## Novedades v3.0 — Vértice, seguridad y fluidez comprobable
 - **Tema nuevo: Vértice** (Ajustes > Apariencia). No es solo otro color: cambia la organización.

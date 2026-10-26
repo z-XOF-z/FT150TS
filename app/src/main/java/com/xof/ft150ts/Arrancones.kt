@@ -101,7 +101,7 @@ object Arrancones {
         } catch (_: Exception) { emptyList() }
         mejores.value = p.getString("mejores", null)?.let { try { leerArr(JSONObject(it)) } catch (_: Exception) { null } }
         mejorFreno.value = p.getString("mejorFreno", null)?.let { try { leerFreno(JSONObject(it)) } catch (_: Exception) { null } }
-        sm = app.getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+        sm = sensores(app)
         scope.launch { UbicacionManager.ubicacion.collect { l -> if (l != null && abierto) gps(l) } }
     }
 

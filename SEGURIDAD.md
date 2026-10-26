@@ -21,6 +21,10 @@ pruebas en el teléfono ni en la tarjeta (no había hardware conectado).
 | 8 | Baja | `allowBackup=true`: el respaldo en la nube de Android incluye rodadas (ubicaciones) | Aceptado, documentado |
 | 9 | Baja | Página WiFi: `/notif` y comandos no delicados sin más control que la clave del WiFi | Aceptado, documentado |
 | 10 | Baja | `BACKUP_URL` del firmware permite `http://` (sin cifrar) | Documentado (la función está sin configurar) |
+| 11 | Media (diseño) | CarPlay (3.1): otra app dibuja dentro del mapa; una app falsa "DiPlay" podría suplantarlo | Controlado (firma + uid) y probado |
+| 12 | Media (diseño) | Ahorro nocturno (3.2): comandos root programados que corren solos | Lista cerrada, validación, registro reversible; probado |
+| 13 | Media (diseño) | SOS (3.3): la app puede mandar SMS sola (`SEND_SMS`) | Solo al número que configuras (validado: 7–15 dígitos, sin códigos `*#`), solo tras una cuenta cancelable; permiso opcional; probado |
+| 14 | Baja | CarPlay (3.3): "Forzar ventana" corre `am start` con root | Comando fijo, solo con los paquetes de DiPlay, sin `-S` (nunca detiene DiPlay) |
 
 ## Detalle
 
@@ -79,6 +83,29 @@ Con el core 3.3.11 el ESP32-S3 viene con NimBLE (`CONFIG_BT_NIMBLE_ENABLED`) y e
 (`esp_gatts_cb_event_t`, `BLESecurityCallbacks`…). El firmware **original 1.3 tampoco compila** en modo placa real con
 este core: no lo causó esta revisión. Opciones: instalar una versión anterior del core que use Bluedroid en el S3, o
 portar el BLE a NimBLE.
+
+### 11. Integración de CarPlay con DiPlay (app 3.1, 2026-10-15)
+- **Riesgo:** el mapa de CarPlay lo dibuja otra app dentro de la nuestra (`SurfaceControlViewHost`). Una app falsa
+  que se hiciera pasar por DiPlay podría dibujar lo que quisiera dentro del mapa.
+- **Control:** solo se le habla a `com.shihab.diplay` / `com.shihab.diplay.hudtest` firmados con el certificado de los
+  releases (SHA-256 `87b38b12…a363`) o con uno que tú marques en pantalla. Esa confianza no viaja en respaldos
+  (`carplay_confianza` en `NO_RESTAURAR`, probado). Las respuestas se aceptan solo del uid de DiPlay; las tardías se
+  descartan. Textos y medidas de la otra app se validan.
+- **Sin permisos ni componentes exportados nuevos** (comparado con `aapt2` contra el APK v3.0). Sin dependencias nuevas.
+- **Pendiente de terceros:** los releases de DiPlay traen una identidad de accesorio sacada del firmware de Carlinkit
+  (lo dice su README). FT150TS no la incluye ni la usa. Detalle en [docs/CARPLAY.md](docs/CARPLAY.md).
+
+### 12. Ahorro nocturno con root (app 3.2, 2026-10-15)
+- **Riesgo:** comandos root programados (ahorro, Doze, grupos de apps, `am kill`, datos/Wi-Fi) que corren solos de noche.
+- **Control:** lista cerrada en `LogicaNoche`; paquetes validados (probado contra inyección: `;`, `&&`, `$()`,
+  comillas, espacios); grupos de espera de una lista fija. Nada de apagar, reiniciar, `setenforce`, particiones,
+  bootloader ni kernel. Cada cambio guarda su valor anterior y se deshace con el inverso; los pendientes se
+  reintentan. El receptor `NocturnoReceiver` no está exportado. El registro (`nocturno_registro`) está en
+  `NO_RESTAURAR` (probado). Apps del sistema, teléfono, SMS, reloj, launcher, FT150TS y DiPlay nunca se tocan.
+- **Permisos nuevos:** `SCHEDULE_EXACT_ALARM`, `RECEIVE_BOOT_COMPLETED`, `READ/WRITE_SYNC_SETTINGS`. Sin componentes
+  exportados nuevos (comparado con `aapt2` contra la v3.1).
+- **Residual:** el Doze forzado deja de quitarse al prender la pantalla si Android mata a FT150TS. Por eso solo se
+  aplica con el servicio en primer plano, y un reinicio lo borra. Detalle en [docs/AHORRO_NOCTURNO.md](docs/AHORRO_NOCTURNO.md).
 
 ## Investigación de puertas traseras
 - **Sin hallazgos.** No hay carga dinámica de código (`DexClassLoader`, `Class.forName`), reflexión, Base64 ni código

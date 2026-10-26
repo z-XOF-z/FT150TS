@@ -1,0 +1,13 @@
+# Baseline Profile de FT150TS: le dice a Android qué compilar por adelantado (AOT) al instalar.
+# Medido en el POCO F4 con HyperOS 1: la ROM solo compila lo que está en el perfil (speed-profile, aunque se pida
+# speed); sin esto el código corría en el intérprete (~17 % de la CPU al cambiar de pestaña).
+# Formato: banderas + descriptor completo de la clase (con L inicial y ;). Hasta la v3.6.3 faltaban la L y el ; y
+# ninguna regla coincidía: el perfil salía casi vacío.
+HSPLLcom/xof/ft150ts/**;->**(**)**
+HSPLLandroidx/compose/**;->**(**)**
+HSPLLkotlinx/coroutines/**;->**(**)**
+HSPLLkotlin/**;->**(**)**
+Lcom/xof/ft150ts/**;
+Landroidx/compose/**;
+Lkotlinx/coroutines/**;
+Lkotlin/**;

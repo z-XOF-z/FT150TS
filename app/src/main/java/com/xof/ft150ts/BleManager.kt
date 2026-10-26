@@ -268,6 +268,7 @@ object BleManager {
                 val hora = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
                 Moto.comandoSilencioso("hora $hora")
                 Moto.pedirMantenimiento()
+                FuncionesAvanzadas.pedirEstado()
             }
         }
 

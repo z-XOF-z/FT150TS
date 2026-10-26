@@ -78,6 +78,16 @@ fun PantallaInicio(onTerminar: () -> Unit) {
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null) { onTerminar() },
         contentAlignment = Alignment.Center,
     ) {
+        // v3.10: pantallas neón (Ajustes > Apariencia > Pantalla de inicio); "Al azar" elige una al abrir
+        val variante = remember {
+            val e = com.xof.ft150ts.Apariencia.estiloInicio
+            if (e == com.xof.ft150ts.INICIOS.size - 1) 1 + (Math.random() * 3).toInt() else e
+        }
+        if (variante != 0) {
+            val v = remember { com.xof.ft150ts.Actualizador.versionActual(ctx) }
+            InicioNeon(variante, ms, v)
+            return@BoxWithConstraints
+        }
         val ancho = min(maxWidth.value, maxHeight.value * 1.3f)
         val tamLogo = (ancho / 4.3f).sp
 
@@ -171,9 +181,10 @@ fun PantallaInicio(onTerminar: () -> Unit) {
         // ---- la cortina (va encima de todo y se abre) ----
         Cortina(ms, Modifier.fillMaxSize())
 
-        // versión abajo
+        // versión abajo (la real del APK, no un texto fijo)
+        val version = remember { com.xof.ft150ts.Actualizador.versionActual(ctx) }
         Text(
-            "v2.9.2", color = Paleta.textoSec.copy(alpha = fase(ms, 1500f, 500f)), fontSize = 8.sp,
+            "v$version", color =Paleta.textoSec.copy(alpha = fase(ms, 1500f, 500f)), fontSize = 8.sp,
             fontFamily = Fuentes.pixel,
             modifier = Modifier.align(Alignment.BottomCenter).padding(bottom = 28.dp),
         )

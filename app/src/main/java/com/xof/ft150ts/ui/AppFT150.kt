@@ -2,13 +2,23 @@ package com.xof.ft150ts.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.foundation.layout.offset
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.IntOffset
+import kotlin.math.roundToInt
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
-import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.ui.input.pointer.PointerEventPass
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -26,6 +36,7 @@ import androidx.compose.foundation.layout.safeDrawingPadding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.pager.HorizontalPager
+import androidx.compose.foundation.pager.PagerState
 import androidx.compose.foundation.pager.rememberPagerState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.material3.AlertDialog
@@ -35,6 +46,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
@@ -53,23 +66,30 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.xof.ft150ts.Apariencia
+import com.xof.ft150ts.CarPlay
+import com.xof.ft150ts.CarPlayPestana
+import com.xof.ft150ts.ModoCarPlay
+import com.xof.ft150ts.Root
 import com.xof.ft150ts.Logros
 import com.xof.ft150ts.Conexion
 import com.xof.ft150ts.Lanzador
 import com.xof.ft150ts.Moto
 import com.xof.ft150ts.PAGINA_TABLERO
 import com.xof.ft150ts.Reposo
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 // 0 = apps (launcher, a la izquierda del tablero), 1 tablero, 2 auto, 3 moto, 4 ajustes (engrane)
 private val PAGINAS = listOf("", "Tablero", "Auto", "Moto", "")
 private const val PAG_TABLERO = PAGINA_TABLERO
+private const val PAG_AUTO = 2
 
 /**
  * Raíz de la app: primero la animación de arranque y luego las cinco páginas,
@@ -138,25 +158,36 @@ private fun Principal(
         }
     }
     // Atrás: regresa al tablero; si la app es la pantalla de inicio, en el tablero no hace nada
-    val soyInicio = remember(pager.currentPage) { Lanzador.esInicioPredeterminado(ctx) }
-    BackHandler(enabled = pager.currentPage != PAG_TABLERO || soyInicio) {
+    // derivedStateOf + settledPage: esta pantalla entera no se recompone (ni pregunta al sistema quién es el inicio)
+    // a media animación de cada cambio de pestaña, solo al llegar o salir del tablero
+    val enTablero by remember { derivedStateOf { pager.settledPage == PAG_TABLERO } }
+    val soyInicio = remember(enTablero) { Lanzador.esInicioPredeterminado(ctx) }
+    BackHandler(enabled = !enTablero || soyInicio) {
         if (pager.currentPage != PAG_TABLERO) scope.launch { pager.animateScrollToPage(PAG_TABLERO) }
     }
-    // Franja de arriba: deslizar aquí cambia de página aunque el mapa ocupe todo lo demás
+    // Franja de arriba: deslizar aquí cambia de página aunque el mapa (o CarPlay en modo Pestaña) ocupe todo lo demás.
+    // Se OBSERVA el gesto en la pasada inicial, antes que los hijos: antes la fila de pestañas (que se desplaza de lado)
+    // se comía el deslizar y solo funcionaba sobre el logo o el reloj. No consume nada: un toque sigue siendo un toque.
     val deslizar = Modifier.pointerInput(Unit) {
-        var total = 0f
-        detectHorizontalDragGestures(
-            onDragStart = { total = 0f },
-            onDragEnd = {
-                val umbral = 48.dp.toPx()
-                val destino = when {
-                    total < -umbral -> (pager.currentPage + 1).coerceAtMost(PAGINAS.size - 1)
-                    total > umbral -> (pager.currentPage - 1).coerceAtLeast(0)
-                    else -> pager.currentPage
-                }
-                if (destino != pager.currentPage) scope.launch { pager.animateScrollToPage(destino) }
-            },
-        ) { cambio, dx -> total += dx; cambio.consume() }
+        awaitEachGesture {
+            val abajo = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            var total = 0f
+            var x = abajo.position.x
+            while (true) {
+                val e = awaitPointerEvent(PointerEventPass.Initial)
+                val c = e.changes.firstOrNull { it.id == abajo.id } ?: break
+                total += c.position.x - x
+                x = c.position.x
+                if (!c.pressed) break
+            }
+            val umbral = 48.dp.toPx()
+            val destino = when {
+                total < -umbral -> (pager.currentPage + 1).coerceAtMost(PAGINAS.size - 1)
+                total > umbral -> (pager.currentPage - 1).coerceAtLeast(0)
+                else -> pager.currentPage
+            }
+            if (destino != pager.currentPage) scope.launch { pager.animateScrollToPage(destino) }
+        }
     }
     val conexion by Moto.conexion.collectAsStateWithLifecycle()
     val datosMalos by Moto.datosMalos.collectAsStateWithLifecycle()
@@ -165,7 +196,24 @@ private fun Principal(
     // Con la pantalla apagada (o en otra app) ninguna página cuenta como visible: mapa, brújula y relojes descansan.
     // collectAsState (no ...WithLifecycle) a propósito: tiene que enterarse justo cuando se deja de ver.
     val enPantalla by Lanzador.enPantalla.collectAsState()
+    val cpTapaAuto by CarPlayPestana.visible.collectAsStateWithLifecycle()
     val irA: (Int) -> Unit = { i -> scope.launch { pager.animateScrollToPage(i) } }
+
+    // CarPlay en modo Pestaña (root): aparece al estar en Auto y se esconde (sin cortar la sesión) al deslizar a otra
+    // pestaña, al irte a otra app o en reposo. Sin root no se abre solo (en pantalla completa taparía FT150TS en ciclo).
+    val cpOn by CarPlay.enMapa.collectAsStateWithLifecycle()
+    val cpModo by CarPlay.modo.collectAsStateWithLifecycle()
+    val rootOkCp = Root.activo.collectAsStateWithLifecycle().value
+    val rootDispCp by Root.disponible.collectAsStateWithLifecycle()
+    // Destino del pager: CarPlay aparece (o se va) en cuanto sueltas el deslizamiento, sin esperar la animación
+    val enAuto = pager.targetPage == PAG_AUTO
+    val cpPestana = cpOn && cpModo == ModoCarPlay.PESTANA && rootOkCp && rootDispCp == true
+    LaunchedEffect(cpPestana, enAuto, enPantalla, tapado) {
+        if (cpPestana && enAuto && enPantalla && !tapado) {
+            delay(16)                                        // un cuadro
+            CarPlayPestana.mostrar(ctx)
+        } else CarPlayPestana.esconder(ctx)
+    }
     val alChip: () -> Unit = {
         when (conexion) {
             Conexion.BT_APAGADO -> onActivarBt()
@@ -174,22 +222,45 @@ private fun Principal(
         }
     }
     // Las cinco páginas (las mismas en todos los temas; lo que cambia es el marco alrededor)
+    // Racing Morado: cuánto está bajada la barra (px que hay que sumar para saber dónde quedarían las páginas con la
+    // barra arriba, que es como se ve CarPlay). 0 en los demás temas.
+    val ajusteYRef = remember { intArrayOf(0) }
     val paginas: @Composable (Modifier) -> Unit = { mod ->
         HorizontalPager(
             state = pager,
-            modifier = mod,
+            // Dónde quedan las páginas en la pantalla: ahí se pone CarPlay en el modo Pestaña
+            modifier = mod.onGloballyPositioned { c ->
+                val p = c.positionInWindow()
+                val y = p.y.toInt() + ajusteYRef[0]
+                val nueva = intArrayOf(p.x.toInt(), y, p.x.toInt() + c.size.width, y + c.size.height)
+                val vieja = CarPlayPestana.area
+                if (vieja == null || !vieja.contentEquals(nueva)) {
+                    if (vieja != null) CarPlayPestana.reiniciarMedidas()      // giró la pantalla o cambió el marco
+                    CarPlayPestana.area = nueva
+                }
+            },
             beyondViewportPageCount = PAGINAS.size,   // todas armadas: el mapa no se recarga y no hay tirones
         ) { pagina ->
             // Las páginas ocultas siguen vivas pero apagan sus relojes y animaciones
-            CompositionLocalProvider(LocalPaginaVisible provides (pager.currentPage == pagina && enPantalla && !tapado)) {
+            // Con CarPlay (modo Pestaña) encima de Auto, la página de abajo no se ve: descansa como si estuviera oculta
+            val tapadaPorCarPlay = pagina == PAG_AUTO && cpTapaAuto
+            // Rendimiento: mientras se desliza sigue viva la página de donde sales y la de destino despierta al llegar.
+            // Con currentPage despertaba a media animación (y la de en medio, p. ej. el mapa de Auto al ir de Tablero a
+            // Moto, despertaba y se volvía a dormir): eso era el tirón al cambiar de pestaña.
+            val viva = if (pager.isScrollInProgress) pager.settledPage else pager.currentPage
+            CompositionLocalProvider(LocalPaginaVisible provides (viva == pagina && enPantalla && !tapado && !tapadaPorCarPlay)) {
                 // Todas las páginas se quedan armadas (cambiar de pestaña es instantáneo);
                 // las que no se ven dejan de actualizarse (ver enVivo()).
-                when (pagina) {
-                    0 -> PantallaApps()
-                    1 -> PantallaTablero()
-                    2 -> PantallaAuto(onAccesoNotif)
-                    3 -> PantallaMoto()
-                    else -> PantallaAjustes(onAccesoNotif, onVerInicio)
+                // Rendimiento: cada página en su propia capa. Al deslizar, el pager solo mueve la capa; sin esto el hilo
+                // principal volvía a grabar el dibujo completo de las páginas en cada cuadro del deslizamiento.
+                Box(Modifier.fillMaxSize().graphicsLayer()) {
+                    when (pagina) {
+                        0 -> PantallaApps()
+                        1 -> PantallaTablero()
+                        2 -> PantallaAuto(onAccesoNotif)
+                        3 -> PantallaMoto()
+                        else -> PantallaAjustes(onAccesoNotif, onVerInicio)
+                    }
                 }
             }
         }
@@ -204,11 +275,47 @@ private fun Principal(
         }
     }
 
+    // Barra de pestañas de siempre (logo, pestañas, tira de estado y chip) con su línea; [lineaArriba] la voltea
+    // (Racing Morado con la barra abajo del tablero)
+    val lineaBarra: @Composable (Boolean) -> Unit = { arriba ->
+        // línea lima con corte diagonal junto a la barra (con margen para deslizar entre páginas)
+        Canvas(Modifier.fillMaxWidth().height(14.dp).then(deslizar).padding(top = if (arriba) 11.dp else 0.dp, bottom = if (arriba) 0.dp else 11.dp)) {
+            val p = Path().apply {
+                moveTo(0f, 0f); lineTo(size.width * 0.32f, 0f)
+                lineTo(size.width * 0.32f - size.height, size.height); lineTo(0f, size.height); close()
+            }
+            drawPath(p, Paleta.lima)
+            drawRect(Paleta.borde, topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.33f, if (arriba) 0f else size.height - 1f),
+                size = androidx.compose.ui.geometry.Size(size.width * 0.67f, 1f))
+        }
+    }
+    val barraNormal: @Composable (Dp, Boolean) -> Unit = { ancho, lineaArriba ->
+        Column {
+            if (lineaArriba) lineaBarra(true)
+            Row(
+                Modifier.fillMaxWidth().then(deslizar).padding(start = 14.dp, end = 12.dp, top = if (lineaArriba) 4.dp else 8.dp, bottom = if (lineaArriba) 8.dp else 4.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                LogoChico()
+                Spacer(Modifier.width(14.dp))
+                // Si la pantalla es angosta, las pestañas se deslizan en vez de cortarse
+                FilaPestanas(pager, irA, Modifier.weight(1f))
+                // El espacio libre de la derecha: hora, GPS, batería del cel y clima
+                if (ancho >= 760.dp) TiraEstado(Modifier.padding(end = 10.dp), compacta = ancho < 900.dp)
+                ChipConexion(conexion, onClick = alChip)
+            }
+            if (!lineaArriba) lineaBarra(false)
+        }
+    }
+
     // Fondo AMOLED con cuadrícula pixel (y brillos en el tema Vidrio)
     Box(Modifier.fillMaxSize()) {
         FondoApp()
         BoxWithConstraints(Modifier.fillMaxSize().safeDrawingPadding()) {
-            if (temaVertice && maxWidth > maxHeight) {
+            // CarPlay (modo Pestaña, Máximo) no debe tapar el riel de Vértice en horizontal
+            val riel = temaVertice && maxWidth > maxHeight
+            SideEffect { CarPlayPestana.conRiel = riel }
+            if (riel) {
                 // ---- Vértice en horizontal: cabina con el riel a la izquierda; arriba no hay barra ----
                 Row(Modifier.fillMaxSize()) {
                     CompositionLocalProvider(LocalPaginaVisible provides (enPantalla && !tapado)) {
@@ -218,6 +325,27 @@ private fun Principal(
                         LineaCarrera(Modifier.then(deslizar))
                         avisoDatos()
                         paginas(Modifier.weight(1f).fillMaxWidth())
+                    }
+                }
+            } else if (temaRacing) {
+                // ---- Racing Morado: en el Tablero la barra baja y el tablero usa toda la pantalla de arriba; al ir a
+                // cualquier otra pestaña (Auto con CarPlay) sube sola. Las páginas no cambian de tamaño: solo se
+                // recorren (sin tirones) y CarPlay se coloca como si la barra estuviera arriba.
+                val alto = constraints.maxHeight
+                val ancho = maxWidth
+                val abajo by animateFloatAsState(if (pager.targetPage == PAG_TABLERO) 1f else 0f, tween(320), label = "barra")
+                var hBarra by remember { mutableIntStateOf(0) }
+                val hBarraDp = with(LocalDensity.current) { hBarra.toDp() }
+                Box(Modifier.fillMaxSize()) {
+                    paginas(Modifier.fillMaxSize().padding(bottom = hBarraDp).offset {
+                        ajusteYRef[0] = (hBarra * abajo).roundToInt()
+                        IntOffset(0, (hBarra * (1f - abajo)).roundToInt())
+                    })
+                    Column(Modifier.fillMaxWidth().onSizeChanged { hBarra = it.height }
+                        .offset { IntOffset(0, ((alto - hBarra) * abajo).roundToInt()) }) {
+                        if (abajo > 0.5f) avisoDatos()
+                        barraNormal(ancho, abajo > 0.5f)
+                        if (abajo <= 0.5f) avisoDatos()
                     }
                 }
             } else Column(Modifier.fillMaxSize()) {
@@ -244,37 +372,7 @@ private fun Principal(
                         }
                         LineaFilo(Modifier.then(deslizar).padding(bottom = 8.dp)) { finNav.floatValue }
                     }
-                } else {
-                    Column {
-                        Row(
-                            Modifier.fillMaxWidth().then(deslizar).padding(start = 14.dp, end = 12.dp, top = 8.dp, bottom = 4.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            LogoChico()
-                            Spacer(Modifier.width(14.dp))
-                            // Si la pantalla es angosta, las pestañas se deslizan en vez de cortarse
-                            Row(Modifier.weight(1f).horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                                PAGINAS.forEachIndexed { i, nombre ->
-                                    val icono = when (i) { 0 -> Iconos.Apps; PAGINAS.size - 1 -> Iconos.Ajustes; else -> null }
-                                    Pestana(nombre, pager.currentPage == i, icono) { irA(i) }
-                                }
-                            }
-                            // El espacio libre de la derecha: hora, GPS, batería del cel y clima
-                            if (ancho >= 760.dp) TiraEstado(Modifier.padding(end = 10.dp), compacta = ancho < 900.dp)
-                            ChipConexion(conexion, onClick = alChip)
-                        }
-                        // línea lima con corte diagonal bajo la barra (con margen para deslizar entre páginas)
-                        Canvas(Modifier.fillMaxWidth().height(14.dp).then(deslizar).padding(bottom = 11.dp)) {
-                            val p = Path().apply {
-                                moveTo(0f, 0f); lineTo(size.width * 0.32f, 0f)
-                                lineTo(size.width * 0.32f - size.height, size.height); lineTo(0f, size.height); close()
-                            }
-                            drawPath(p, Paleta.lima)
-                            drawRect(Paleta.borde, topLeft = androidx.compose.ui.geometry.Offset(size.width * 0.33f, size.height - 1f),
-                                size = androidx.compose.ui.geometry.Size(size.width * 0.67f, 1f))
-                        }
-                    }
-                }
+                } else barraNormal(ancho, false)
             }
             avisoDatos()
             paginas(Modifier.weight(1f).fillMaxWidth())
@@ -296,6 +394,9 @@ private fun Principal(
     if (llamada.activa && ocultarLlamada != llave) {
         DialogoLlamada(llamada.de, llamada.acciones) { ocultarLlamada = llave }
     }
+
+    // SOS por caída: tapa todo (encima de cualquier página y del reposo)
+    CuentaSosPantalla()
 }
 
 /**
@@ -365,13 +466,24 @@ internal fun LogoChico() {
             }
         }
     ) {
-        Row(verticalAlignment = Alignment.Bottom) {
-            Text("FT150", color = Paleta.texto, fontSize = 18.sp, fontFamily = Fuentes.logo,
-                modifier = Modifier.alignByBaseline())
-            Text("TS", color = Paleta.lima, fontSize = 8.sp, fontFamily = Fuentes.logo,
-                modifier = Modifier.alignByBaseline().padding(start = 2.dp))
+        if (temaRacing) {
+            // Racing Morado: "FT150TS" en itálica de carreras con el TS morado y brillo, como el tablero
+            Row(verticalAlignment = Alignment.Bottom) {
+                val brillo = androidx.compose.ui.text.TextStyle(shadow = androidx.compose.ui.graphics.Shadow(Paleta.lima, blurRadius = 14f))
+                Text("FT150", color = Paleta.texto, fontSize = 21.sp, fontFamily = Fuentes.logo,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic)
+                Text("TS", color = Paleta.lima, fontSize = 21.sp, fontFamily = Fuentes.logo,
+                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic, style = brillo)
+            }
+        } else {
+            Row(verticalAlignment = Alignment.Bottom) {
+                Text("FT150", color = Paleta.texto, fontSize = 18.sp, fontFamily = Fuentes.logo,
+                    modifier = Modifier.alignByBaseline())
+                Text("TS", color = Paleta.lima, fontSize = 8.sp, fontFamily = Fuentes.logo,
+                    modifier = Modifier.alignByBaseline().padding(start = 2.dp))
+            }
+            EtiquetaPixel("xof", Paleta.textoSec, 6.sp)
         }
-        EtiquetaPixel("xof", Paleta.textoSec, 6.sp)
     }
 }
 
@@ -436,5 +548,16 @@ internal fun ChipConexion(c: Conexion, compacto: Boolean = false, onClick: () ->
         Box(Modifier.size(7.dp).background(color))   // punto cuadrado, estilo pixel
         Spacer(Modifier.width(6.dp))
         EtiquetaPixel(texto, Paleta.texto, 8.sp)
+    }
+}
+
+/** Las pestañas de la barra clásica: en su propia función para que al cambiar de página solo se recomponga esta fila. */
+@Composable
+private fun FilaPestanas(pager: PagerState, irA: (Int) -> Unit, modifier: Modifier = Modifier) {
+    Row(modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+        PAGINAS.forEachIndexed { i, nombre ->
+            val icono = when (i) { 0 -> Iconos.Apps; PAGINAS.size - 1 -> Iconos.Ajustes; else -> null }
+            Pestana(nombre, pager.currentPage == i, icono) { irA(i) }
+        }
     }
 }
