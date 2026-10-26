@@ -1,0 +1,16 @@
+.title KiCad schematic
+.include "C:/Users/xbox4/Downloads/FT150TS-App-v3.0/pcb/simulacion/modelos.lib"
+.tran 5u 25m
+V1 /GPIO GND PULSE( 0 3.3 1m 1u 1u 10m 25m ) 
+R711 /GPIO /RL_A 470
+R713 /RL_B GND 10k
+XU71 /RL_A GND /V5 /RL_E PC817
+R712 /RL_E /RL_B 1k
+V2 /V5 GND DC 5 
+Q71 /BOB /RL_B GND QBC547B
+L1 /BOBX /BOB 150m
+R98 /V5 /BOBX 70
+D71 /BOB /V5 D1N4007
+DLED1 /LED_A /BOB DLEDROJO
+R714 /V5 /LED_A 1k
+.end

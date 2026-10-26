@@ -1,0 +1,10 @@
+.title KiCad schematic
+.include "C:/Users/xbox4/Downloads/FT150TS-App-v3.0/pcb/simulacion/modelos.lib"
+.tran 10u 20m
+V1 /ENT GND PWL( 0 0 20m 16 ) 
+R120 /ENT /OPT_A 1.5k
+V2 /V33 GND DC 3.3 
+R99 /V33 /GPIO 45k
+XU12 /OPT_A GND /GPIO GND PC817
+D120 GND /OPT_A D1N4148
+.end

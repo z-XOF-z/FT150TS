@@ -1,0 +1,9 @@
+.title KiCad schematic
+.op
+R2 /ADC1 GND 22k
+V1 /BAT GND DC 16 
+R1 /BAT /ADC1 100k
+R3 /CELDA /ADC4 100k
+V2 /CELDA GND DC 4.2 
+R4 /ADC4 GND 100k
+.end

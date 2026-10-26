@@ -1,0 +1,23 @@
+* Corte de chispa con IRF840: modelo simple de CDI de AC
+.include "C:/Users/xbox4/Downloads/FT150TS-App-v3.0/pcb/simulacion/modelos.lib"
+.model IRF840 VDMOS(Rg=3 Vto=4 Rd=0.4 Rs=0.1 Kp=6 Cgdmax=1.2n Cgdmin=20p Cgs=1.2n Cjo=0.4n Is=1e-12 Rb=0.03 BV=500)
+.model DZ15 D(Is=1e-12 Rs=5 BV=15 IBV=17m)
+* Bobina de excitación del CDI: 300 V pico a 100 Hz con 200 ohm de resistencia interna
+Vexc exc 0 SIN(0 300 100)
+Rexc exc paro 200
+* Lo que hay dentro del CDI: diodo que carga el capacitor de disparo de 1 uF (con descarga lenta)
+Dcdi paro capin D1N4007
+Vsen capin cap 0
+Ccdi cap 0 1u
+Rfuga cap 0 2k
+* Nuestro circuito: GPIO47 -> 470 -> PC817 -> compuerta del IRF840 -> 1N4007 al cable de paro
+Vgpio gpio 0 PULSE(0 3.3 50m 1u 1u 50m 200m)
+R28 gpio ssr_a 470
+XU15 ssr_a 0 v12 g PC817
+V12 v12 0 DC 12
+R31 g 0 10k
+DZ1 0 g DZ15
+M9 d g 0 IRF840
+D8 paro d D1N4007
+.tran 20u 150m
+.end

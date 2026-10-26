@@ -1,0 +1,24 @@
+* Modelos SPICE para simular los bloques de la placa FT150TS (aproximados, de hojas de datos públicas).
+
+* Diodos
+.model D1N4007 D(Is=7.03n Rs=0.034 N=1.81 Cjo=10p M=0.3 BV=1000 IBV=5u Tt=4.3u)
+.model D1N4148 D(Is=4.35n Rs=0.65 N=1.91 Cjo=7p M=0.29 Vj=0.6 BV=100 IBV=100u Tt=6.4n)
+.model DBAT85 D(Is=0.21u Rs=2.3 N=1.02 Cjo=11p M=0.4 BV=30 IBV=2u)
+.model D1N5819 D(Is=31.7u Rs=0.051 N=1.37 Cjo=190p M=0.3 BV=40 IBV=1m)
+.model DLEDROJO D(Is=1e-19 N=1.6 Rs=2 Cjo=20p BV=5 IBV=10u)
+
+* Transistores
+.model QBC547B NPN(Is=2.39e-14 Bf=294 Vaf=63 Ikf=0.3 Ise=3.5e-15 Ne=1.5 Br=7.5 Rb=10 Rc=1 Re=0.2 Cje=12p Cjc=5p Tf=0.4n Tr=10n)
+.model QBD140 PNP(Is=1e-13 Bf=100 Vaf=100 Ikf=1.5 Br=5 Rb=5 Rc=0.1 Re=0.05 Cje=150p Cjc=80p Tf=10n)
+
+* Optoacoplador PC817 (CTR ~100 %): LED infrarrojo + fototransistor.
+* Pines: A = ánodo, K = cátodo, C = colector, E = emisor.
+.subckt PC817 A K C E
+D1 A n1 DIRLED
+Vsensor n1 K 0
+F1 E b Vsensor 0.005
+Q1 C b E QFOTO
+Rbe b E 2Meg
+.model DIRLED D(Is=1e-14 N=1.8 Rs=1 Cjo=30p BV=6 IBV=10u)
+.model QFOTO NPN(Is=1e-14 Bf=200 Vaf=80 Cje=10p Cjc=8p Tf=1u Tr=5u)
+.ends PC817

@@ -1,0 +1,648 @@
+(kicad_sch (version 20231120) (generator "eeschema") (generator_version "8.0")
+  (uuid "4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56")
+  (paper "A4")
+  (title_block (title "Divisores: moto 16 V -> GPIO1 y celdas 4.2 V -> GPIO4") (company "FT150TS"))
+  (lib_symbols
+    (symbol "Device:R"
+    		(pin_numbers
+    			(hide yes)
+    		)
+    		(pin_names
+    			(offset 0)
+    		)
+    		(exclude_from_sim no)
+    		(in_bom yes)
+    		(on_board yes)
+    		(in_pos_files yes)
+    		(duplicate_pin_numbers_are_jumpers no)
+    		(property "Reference" "R"
+    			(at 2.032 0 90)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Value" "R"
+    			(at 0 0 90)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Footprint" ""
+    			(at -1.778 0 90)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Datasheet" ""
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Description" "Resistor"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "ki_keywords" "R res resistor"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "ki_fp_filters" "R_*"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(symbol "R_0_1"
+    			(rectangle
+    				(start -1.016 -2.54)
+    				(end 1.016 2.54)
+    				(stroke
+    					(width 0.254)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    		)
+    		(symbol "R_1_1"
+    			(pin passive line
+    				(at 0 3.81 270)
+    				(length 1.27)
+    				(name ""
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    				(number "1"
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    			)
+    			(pin passive line
+    				(at 0 -3.81 90)
+    				(length 1.27)
+    				(name ""
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    				(number "2"
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    			)
+    		)
+    		(embedded_fonts no)
+    	)
+    (symbol "Simulation_SPICE:VDC"
+    		(pin_numbers
+    			(hide yes)
+    		)
+    		(pin_names
+    			(offset 0.0254)
+    		)
+    		(exclude_from_sim no)
+    		(in_bom yes)
+    		(on_board yes)
+    		(in_pos_files yes)
+    		(duplicate_pin_numbers_are_jumpers no)
+    		(property "Reference" "V"
+    			(at 2.54 2.54 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    				(justify left)
+    			)
+    		)
+    		(property "Value" "1"
+    			(at 2.54 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    				(justify left)
+    			)
+    		)
+    		(property "Footprint" ""
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Datasheet" "https://ngspice.sourceforge.io/docs/ngspice-html-manual/manual.xhtml#sec_Independent_Sources_for"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Description" "Voltage source, DC"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Sim.Pins" "1=+ 2=-"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Sim.Type" "DC"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Sim.Device" "V"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    				(justify left)
+    			)
+    		)
+    		(property "ki_keywords" "simulation"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(symbol "VDC_0_0"
+    			(polyline
+    				(pts
+    					(xy -1.27 0.254) (xy 1.27 0.254)
+    				)
+    				(stroke
+    					(width 0)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    			(polyline
+    				(pts
+    					(xy -0.762 -0.254) (xy -1.27 -0.254)
+    				)
+    				(stroke
+    					(width 0)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    			(polyline
+    				(pts
+    					(xy 0.254 -0.254) (xy -0.254 -0.254)
+    				)
+    				(stroke
+    					(width 0)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    			(polyline
+    				(pts
+    					(xy 1.27 -0.254) (xy 0.762 -0.254)
+    				)
+    				(stroke
+    					(width 0)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    			(text "+"
+    				(at 0 1.905 0)
+    				(effects
+    					(font
+    						(size 1.27 1.27)
+    					)
+    				)
+    			)
+    		)
+    		(symbol "VDC_0_1"
+    			(circle
+    				(center 0 0)
+    				(radius 2.54)
+    				(stroke
+    					(width 0.254)
+    					(type default)
+    				)
+    				(fill
+    					(type background)
+    				)
+    			)
+    		)
+    		(symbol "VDC_1_1"
+    			(pin passive line
+    				(at 0 5.08 270)
+    				(length 2.54)
+    				(name ""
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    				(number "1"
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    			)
+    			(pin passive line
+    				(at 0 -5.08 90)
+    				(length 2.54)
+    				(name ""
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    				(number "2"
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    			)
+    		)
+    		(embedded_fonts no)
+    	)
+    (symbol "power:GND"
+    		(power global)
+    		(pin_numbers
+    			(hide yes)
+    		)
+    		(pin_names
+    			(offset 0)
+    			(hide yes)
+    		)
+    		(exclude_from_sim no)
+    		(in_bom yes)
+    		(on_board yes)
+    		(in_pos_files yes)
+    		(duplicate_pin_numbers_are_jumpers no)
+    		(property "Reference" "#PWR"
+    			(at 0 -6.35 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Value" "GND"
+    			(at 0 -3.81 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Footprint" ""
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Datasheet" ""
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "Description" "Power symbol creates a global label with name \"GND\" , ground"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(property "ki_keywords" "global power"
+    			(at 0 0 0)
+    			(show_name no)
+    			(do_not_autoplace no)
+    			(hide yes)
+    			(effects
+    				(font
+    					(size 1.27 1.27)
+    				)
+    			)
+    		)
+    		(symbol "GND_0_1"
+    			(polyline
+    				(pts
+    					(xy 0 0) (xy 0 -1.27) (xy 1.27 -1.27) (xy 0 -2.54) (xy -1.27 -1.27) (xy 0 -1.27)
+    				)
+    				(stroke
+    					(width 0)
+    					(type default)
+    				)
+    				(fill
+    					(type none)
+    				)
+    			)
+    		)
+    		(symbol "GND_1_1"
+    			(pin power_in line
+    				(at 0 0 270)
+    				(length 0)
+    				(name ""
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    				(number "1"
+    					(effects
+    						(font
+    							(size 1.27 1.27)
+    						)
+    					)
+    				)
+    			)
+    		)
+    		(embedded_fonts no)
+    	)
+  )
+  (symbol (lib_id "Simulation_SPICE:VDC") (at 30.00 60.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "c7cac568-fe99-4b88-8c00-0ec16bf9cb45")
+    (property "Reference" "V1" (at 33.00 56.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "moto 16V" (at 33.00 64.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Device" "V" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Type" "DC" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Pins" "1=+ 2=-" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Params" "dc=16" (at 30.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "55371b1d-469a-4c4b-8d03-68251edb08ad"))
+    (pin "2" (uuid "34d4d47f-88b5-4cf4-a1e0-4005f631fe71"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "V1") (unit 1)))))
+  (label "BAT" (at 30.00 54.92 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "00bea351-0c7b-4fde-ba0a-0a58e40ce2fa"))
+  (symbol (lib_id "power:GND") (at 30.00 65.08 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "4f83d7c0-3f0f-4d4b-aca7-502e6a51d1c3")
+    (property "Reference" "#PWR01" (at 30.00 71.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Value" "GND" (at 30.00 68.58 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 30.00 65.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 30.00 65.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "90397344-db86-4e1a-b1d9-cb02a00bed54"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "#PWR01") (unit 1)))))
+  (symbol (lib_id "Device:R") (at 55.00 50.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "661464a9-c4c9-44b0-a684-b13b3073ede4")
+    (property "Reference" "R1" (at 58.00 46.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "100k" (at 58.00 54.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 55.00 50.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 55.00 50.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "3318aed3-ff39-462b-b03e-a928aa1ead21"))
+    (pin "2" (uuid "95ea7bb3-7c86-426e-9b9f-3a26fd046537"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "R1") (unit 1)))))
+  (label "BAT" (at 55.00 46.19 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "55a0f895-be11-4568-bade-9d847e3b7811"))
+  (label "ADC1" (at 55.00 53.81 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "136df1da-1907-41d9-b723-b94e427ab502"))
+  (symbol (lib_id "Device:R") (at 55.00 70.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "77c9454b-cd8f-4e48-a98e-a9ff037274c7")
+    (property "Reference" "R2" (at 58.00 66.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "22k" (at 58.00 74.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 55.00 70.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 55.00 70.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "005a3a01-ae43-49a7-b704-db3ca7f56317"))
+    (pin "2" (uuid "0b92e233-5317-4dff-8f1b-7420b2733f38"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "R2") (unit 1)))))
+  (label "ADC1" (at 55.00 66.19 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "f66d04cd-c6d7-4100-a9a0-2bbb00d35f26"))
+  (symbol (lib_id "power:GND") (at 55.00 73.81 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "9cc52089-e84f-4620-b395-42404d605944")
+    (property "Reference" "#PWR02" (at 55.00 79.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Value" "GND" (at 55.00 77.31 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 55.00 73.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 55.00 73.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "1e2295a9-3041-45a3-a0aa-300fe948e83c"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "#PWR02") (unit 1)))))
+  (symbol (lib_id "Simulation_SPICE:VDC") (at 100.00 60.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "ade249a3-4e9c-4ebc-a882-76712e89ae43")
+    (property "Reference" "V2" (at 103.00 56.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "celdas 4.2V" (at 103.00 64.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Device" "V" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Type" "DC" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Pins" "1=+ 2=-" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Sim.Params" "dc=4.2" (at 100.00 60.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "1ab5b30d-f9fd-4b0f-a057-da917038bb7e"))
+    (pin "2" (uuid "5887043f-13cc-466f-b9b2-d90bd23e7ddb"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "V2") (unit 1)))))
+  (label "CELDA" (at 100.00 54.92 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "a754b50b-bec6-47d5-aa65-ddd83567f473"))
+  (symbol (lib_id "power:GND") (at 100.00 65.08 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "6089db38-d3ae-4ef8-ae6d-4da0d77275be")
+    (property "Reference" "#PWR03" (at 100.00 71.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Value" "GND" (at 100.00 68.58 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 100.00 65.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 100.00 65.08 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "e661e089-70db-46fd-8832-7d57063e31f8"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "#PWR03") (unit 1)))))
+  (symbol (lib_id "Device:R") (at 125.00 50.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "c8f2f7c4-d180-41d9-bdd2-fd0936211d4e")
+    (property "Reference" "R3" (at 128.00 46.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "100k" (at 128.00 54.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 125.00 50.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 125.00 50.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "4e0ecdb0-a0f1-4ecc-b225-2746cf4a05c3"))
+    (pin "2" (uuid "84e61180-dd1d-48c2-b659-e2cdb1ff6edb"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "R3") (unit 1)))))
+  (label "CELDA" (at 125.00 46.19 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "fec958fc-fc2c-468b-b036-3f2f8e2960fc"))
+  (label "ADC4" (at 125.00 53.81 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "9111e66d-e223-4eed-9d90-66c73f2d6637"))
+  (symbol (lib_id "Device:R") (at 125.00 70.00 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "d98b2897-d2e7-4ae2-8999-49e5b09b0acd")
+    (property "Reference" "R4" (at 128.00 66.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Value" "100k" (at 128.00 74.00 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 125.00 70.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 125.00 70.00 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "f0432653-f412-4388-b2a2-82b593a01da0"))
+    (pin "2" (uuid "0ca44df1-1033-460e-ba01-038f5ea72a25"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "R4") (unit 1)))))
+  (label "ADC4" (at 125.00 66.19 0) (fields_autoplaced yes)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "c3baa108-7a0a-48e8-ba54-4a71f929519c"))
+  (symbol (lib_id "power:GND") (at 125.00 73.81 0) (unit 1)
+    (exclude_from_sim no) (in_bom yes) (on_board yes) (dnp no) (uuid "9399566c-b902-4080-ba6d-209d2f7afae5")
+    (property "Reference" "#PWR04" (at 125.00 79.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Value" "GND" (at 125.00 77.31 0)
+      (effects (font (size 1.27 1.27))))
+    (property "Footprint" "" (at 125.00 73.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (property "Datasheet" "" (at 125.00 73.81 0)
+      (effects (font (size 1.27 1.27)) (hide yes)))
+    (pin "1" (uuid "0ffafd80-6097-423b-af32-6c8461ab21a0"))
+    (instances (project "04_divisores" (path "/4f7c49f3-ca83-4f3a-b4c0-f5f92a1bcb56" (reference "#PWR04") (unit 1)))))
+  (text ".op" (exclude_from_sim no) (at 30.00 110.00 0)
+    (effects (font (size 2 2)) (justify left bottom)) (uuid "ec07a46c-053b-4393-a450-934689c2e89a"))
+  (text "Punto de operación: ADC1 = 2.89 V con 16 V y ADC4 = 2.1 V con 4.2 V (el ADC del ESP32 llega a ~3.1 V)." (exclude_from_sim no) (at 30.00 120.00 0)
+    (effects (font (size 1.27 1.27)) (justify left bottom)) (uuid "20ffa681-78b0-48fa-bf6d-a77a87ec1054"))
+  (sheet_instances (path "/" (page "1")))
+)

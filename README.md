@@ -103,6 +103,14 @@ arduino-cli compile --fqbn espressif:esp32:esp32s3:PartitionScheme=huge_app firm
 Desde la v1.4 cada tarjeta genera su propia clave de WiFi (se ve por USB al encender o con `wifi clave`) y los
 comandos delicados solo se aceptan de un teléfono vinculado. Detalles en [SEGURIDAD.md](SEGURIDAD.md).
 
+## Placa base y piezas 3D
+
+- **Placa base v2.3** para el ESP32-S3 N16R8 (10×10 cm, 2 capas, piezas de agujero de tiendas de México): guía de armado y conexiones a la moto en [`pcb/ARMADO.md`](pcb/ARMADO.md), esquemático en [PDF](pcb/esquematico/ft150ts_B_esquema.pdf), gerbers para JLCPCB en [`pcb/fabricar/B_JLCPCB`](pcb/fabricar/B_JLCPCB) y piezas en [`pcb/LISTA_COMPRAS.md`](pcb/LISTA_COMPRAS.md).
+- **Placas extra** (expansión I2C con 3 relevadores, fusibles y perforada): [`pcb/extras`](pcb/extras).
+- **Simulaciones** de cada bloque (ngspice/KiCad): [`pcb/simulacion`](pcb/simulacion).
+- **Piezas 3D** (CadQuery): soporte del teléfono para el manubrio y caja de la placa bajo el asiento, en [`carcasa`](carcasa) (STL y STEP).
+- Mapa de todo el proyecto: [`docs/MAPA.md`](docs/MAPA.md).
+
 ## Temas
 
 <div align="center">
