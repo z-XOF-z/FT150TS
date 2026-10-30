@@ -7,6 +7,7 @@ import android.content.pm.ActivityInfo
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.os.SystemClock
 import android.provider.Settings
 import android.view.WindowManager
 import androidx.activity.ComponentActivity
@@ -21,6 +22,8 @@ import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.core.view.WindowInsetsControllerCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.first
 import com.xof.ft150ts.ui.AppFT150
 import com.xof.ft150ts.ui.TemaFT150
 
@@ -71,16 +74,38 @@ class MainActivity : ComponentActivity() {
             val dormida by ModoSueno.dormido.collectAsStateWithLifecycle()
             val reposo by Reposo.enReposo.collectAsStateWithLifecycle()
             val pantallaReposo by Reposo.pantalla.collectAsStateWithLifecycle()
-            LaunchedEffect(modoPantalla, conexion, enMoto, dormida, reposo, pantallaReposo) {
+            val pagina by Lanzador.paginaActual.collectAsStateWithLifecycle()
+            // "En la moto": conectada por Bluetooth o montado con el switch prendido (carga)
+            val enLaMoto = conexion == Conexion.CONECTADO || conexion == Conexion.DEMO || enMoto
+            LaunchedEffect(modoPantalla, enLaMoto, dormida, reposo, pantallaReposo, pagina) {
                 // En reposo con "apagar pantalla": se deja que Android la apague como siempre
-                val prendida = !dormida && !(reposo && pantallaReposo == 1) && when (modoPantalla) {
-                    PantallaEncendida.SIEMPRE -> true
-                    // "En la moto": conectada por Bluetooth o montado con el switch prendido (carga)
-                    PantallaEncendida.CON_MOTO -> conexion == Conexion.CONECTADO || conexion == Conexion.DEMO || enMoto
-                    PantallaEncendida.NORMAL -> false
+                val apagada = dormida || (reposo && pantallaReposo == 1)
+                // Fuera de la moto "Siempre" se suelta tras un rato sin tocarla: se vuelve a revisar al cumplirse
+                while (true) {
+                    val toque = Lanzador.ultimoToque.value
+                    val sinTocar = SystemClock.elapsedRealtime() - toque
+                    val prendida = PantallaEncendidaLogica.mantener(modoPantalla, enLaMoto, pagina, sinTocar, apagada)
+                    if (prendida) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+                    val espera = PantallaEncendidaLogica.revisarEn(modoPantalla, enLaMoto, pagina, sinTocar, apagada)
+                    if (espera != null) { delay(espera + 500); continue }
+                    // Se soltó por no tocarla: al siguiente toque vuelve a quedarse prendida
+                    if (!prendida && modoPantalla == PantallaEncendida.SIEMPRE && !apagada && pagina != PAGINA_APPS) {
+                        Lanzador.ultimoToque.first { it != toque }
+                        continue
+                    }
+                    break
                 }
-                if (prendida) window.addFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
-                else window.clearFlags(WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
+            }
+            // GPS: en el cajón de apps y fuera de la moto no hace falta (el clima usa la última ubicación conocida).
+            // Como la app es el launcher, antes el GPS en alta precisión corría cada vez que veías tus apps.
+            val rodada by Rodadas.enCurso.collectAsStateWithLifecycle()
+            LaunchedEffect(pagina, enLaMoto, rodada) {
+                if (gpsNecesario()) UbicacionManager.arrancar()
+                else {
+                    delay(5_000)                      // por si solo pasas por el cajón
+                    if (!gpsNecesario()) UbicacionManager.pausar()
+                }
             }
             // Tablero encima de la pantalla de bloqueo (como la navegación de Maps)
             val sobreBloqueo by Root.sobreBloqueo.collectAsStateWithLifecycle()
@@ -148,12 +173,14 @@ class MainActivity : ComponentActivity() {
     /** Cualquier toque: estás usando el teléfono (despierta del modo sueño). */
     override fun onUserInteraction() {
         super.onUserInteraction()
+        Lanzador.ultimoToque.value = SystemClock.elapsedRealtime()
         ModoSueno.actividad()
         Reposo.actividad()
     }
 
     override fun onStart() {
         super.onStart()
+        Lanzador.ultimoToque.value = SystemClock.elapsedRealtime()   // al regresar a la app cuenta como uso
         Lanzador.enPantalla.value = true
         Luz.arrancar()
         Dashcam.adjuntar(this)
@@ -170,7 +197,7 @@ class MainActivity : ComponentActivity() {
         aplicarBarras(Apariencia.barras)   // al regresar de otra app Android las vuelve a mostrar
         NfcMoto.habilitar(this)
         MusicaManager.refrescar()
-        UbicacionManager.arrancar()
+        if (gpsNecesario()) UbicacionManager.arrancar()
         AudioSalida.apagarMicBt()      // por si se quedó encendido el micrófono del casco
         AudioSalida.refrescar()
     }
@@ -191,6 +218,13 @@ class MainActivity : ComponentActivity() {
         if (!km.isKeyguardLocked || km.isKeyguardSecure) return
         try { km.requestDismissKeyguard(this, null) } catch (_: Exception) { }
     }
+
+    /** ¿Hace falta el GPS con la app a la vista? En el cajón de apps solo si estás en la moto, grabando una rodada,
+     *  prestándole la ubicación a la tarjeta o con el teléfono haciendo de sensor. */
+    private fun gpsNecesario(): Boolean =
+        Lanzador.paginaActual.value != PAGINA_APPS || Energia.enMoto.value ||
+            Moto.conexion.value == Conexion.CONECTADO || Moto.conexion.value == Conexion.DEMO ||
+            Rodadas.enCurso.value != null || TelefonoMoto.trabajando.value
 
     override fun onPause() {
         super.onPause()

@@ -30,7 +30,7 @@ object ZonaWifi {
 
     private var prefs: SharedPreferences? = null
     private var app: Context? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private var apagado: Job? = null
 
     fun iniciar(ctx: Context) {

@@ -32,7 +32,7 @@ object GestosCarPlay {
 
     private var prefs: SharedPreferences? = null
     private var app: Context? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private var escucha: Job? = null
     @Volatile private var proceso: Process? = null
     private val RUTA_FIFO = Regex("^/data/(user/0|data)/com\\.xof\\.ft150ts/no_backup/toques\\.fifo$")

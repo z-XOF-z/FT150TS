@@ -30,7 +30,7 @@ import kotlinx.coroutines.launch
  */
 class ServicioMoto : Service() {
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var enPrimerPlano = false
     private var textoActual = ""
 
@@ -97,20 +97,28 @@ class ServicioMoto : Service() {
     private fun permiso(p: String) = ContextCompat.checkSelfPermission(this, p) == PackageManager.PERMISSION_GRANTED
 
     /** Tipos de servicio que Android deja usar según los permisos que ya diste. */
-    private fun tipos(conUbicacion: Boolean): Int {
+    private fun tipos(conUbicacion: Boolean, conCamara: Boolean = false): Int {
         if (Build.VERSION.SDK_INT < 29) return 0
         var t = 0
         val bt = if (Build.VERSION.SDK_INT >= 31) permiso(Manifest.permission.BLUETOOTH_CONNECT) else true
         if (bt) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
         if (conUbicacion && permiso(Manifest.permission.ACCESS_FINE_LOCATION)) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_LOCATION
+        // Antirrobo del teléfono: cámara y micrófono con la pantalla apagada (Android 14 lo pide en el tipo del servicio)
+        if (conCamara && Build.VERSION.SDK_INT >= 30 && Vigilancia.activa.value) {
+            if (permiso(Manifest.permission.CAMERA)) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_CAMERA
+            if (permiso(Manifest.permission.RECORD_AUDIO)) t = t or ServiceInfo.FOREGROUND_SERVICE_TYPE_MICROPHONE
+        }
         return t
     }
 
-    /** Con ubicación si se puede; si Android no deja (p. ej. arrancando desde segundo plano), solo Bluetooth. */
+    /**
+     * Con ubicación (y cámara/micrófono si el antirrobo está prendido) si se puede; si Android no deja (p. ej.
+     * arrancando desde segundo plano, cuando cámara y micrófono no se permiten), con menos tipos.
+     */
     private fun ponerEnPrimerPlano(t: String): Boolean {
         val n = notificacion(t)
-        for (conUbicacion in listOf(true, false)) {
-            val tipo = tipos(conUbicacion)
+        for ((conUbicacion, conCamara) in listOf(true to true, true to false, false to false)) {
+            val tipo = tipos(conUbicacion, conCamara)
             if (Build.VERSION.SDK_INT >= 34 && tipo == 0) continue
             try {
                 ServiceCompat.startForeground(this, ID, n, tipo)

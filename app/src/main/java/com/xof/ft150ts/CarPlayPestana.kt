@@ -37,7 +37,13 @@ object CarPlayPestana {
 
     /** Lo que se quiere: true = sobre la pestaña, false = escondida. Lo lee el encargado. */
     private val deseado = MutableStateFlow(false)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    /**
+     * Si HyperOS reporta medidas raras de la ventana (p. ej. un ancho enorme estando escondida), los comandos fijos
+     * rechazan los números (require) y antes eso cerraba TODA la app desde segundo plano (visto el 2026-10-30 a las
+     * 00:46). Ahora solo se anota y se sigue: la siguiente revisión la vuelve a acomodar.
+     */
+    private val fallas = kotlinx.coroutines.CoroutineExceptionHandler { _, e -> log("se ignoró un error: ${e.message}") }
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + fallas)
     @Volatile private var app: Context? = null
     @Volatile private var trabajando = false
     /** Escala con que el sistema dibuja la ventana (se mide la primera vez). */
@@ -116,8 +122,51 @@ object CarPlayPestana {
         app = ctx.applicationContext
         deseado.value = false
         trabajar()
-        if (disponible()) vigilar()
+        if (disponible()) { vigilar(); vigilarPantalla() }
     }
+
+    // ---------------- La pantalla del teléfono ----------------
+
+    /** Hay una ventana de CarPlay abierta por este modo (visible o escondida fuera de la pantalla). */
+    @Volatile private var hayVentana = false
+    private var guardian: kotlinx.coroutines.Job? = null
+
+    /**
+     * La pantalla de CarPlay de DiPlay pide "pantalla siempre encendida". Escondida fuera de la pantalla sigue viva y
+     * Android la respeta: el teléfono no se apagaba ni en el cajón de apps y se descargaba solo. Fuera de la moto y sin
+     * usarse se cierra (ver [PantallaEncendidaLogica.cerrarCarPlay]); al volver a Auto se abre otra vez sola.
+     */
+    private fun vigilarPantalla() {
+        if (guardian?.isActive == true) return
+        guardian = scope.launch {
+            while (hayVentana && CarPlay.modo.value == ModoCarPlay.PESTANA && disponible()) {
+                delay(GUARDIAN_MS)
+                if (deseado.value || trabajando) continue
+                val ctx = app ?: break
+                val enLaMoto = Moto.conexion.value.let { it == Conexion.CONECTADO || it == Conexion.DEMO } || Energia.enMoto.value
+                val sinTocar = android.os.SystemClock.elapsedRealtime() - Lanzador.ultimoToque.value
+                val apagado = try {
+                    android.provider.Settings.System.getInt(ctx.contentResolver, android.provider.Settings.System.SCREEN_OFF_TIMEOUT).toLong()
+                } catch (_: Exception) { 30_000L }
+                if (PantallaEncendidaLogica.cerrarCarPlay(enLaMoto, escondida = true, Lanzador.enPantalla.value, sinTocar, apagado))
+                    cerrarParaApagar(ctx)
+            }
+        }
+    }
+
+    private fun cerrarParaApagar(ctx: Context) {
+        val d = CarPlay.buscar(ctx)?.takeIf { it.confiable } ?: return
+        if (!ProtocoloCarPlay.paqueteSeguro(d.paquete) || deseado.value) return
+        Root.ejecutarCada(listOf("am force-stop ${d.paquete}"))
+        hayVentana = false
+        tarea = -1
+        mostrados = null
+        visible.value = false
+        evento.value = "CarPlay cerrado: fuera de la moto y sin usarse (así la pantalla se puede apagar)"
+        log(evento.value)
+    }
+
+    private const val GUARDIAN_MS = 10_000L
 
     /**
      * FT150TS perdió el foco de la ventana (alguien tocó otra ventana encima). Si CarPlay debía estar escondida, es que
@@ -289,6 +338,7 @@ object CarPlayPestana {
         log("abrir flotante: ${r[0].salida.take(120)} | tarea: ${r[1].salida.take(160)}")
         val t = ProtocoloCarPlay.leerTarea(r[1].salida) ?: run { evento.value = "No encontré la ventana de CarPlay"; log(evento.value); return false }
         tarea = t
+        hayVentana = true
         // La escala se mide con la ventana ya flotante. En HyperOS 1 tarda más en pasar a flotante: se reintenta y,
         // si no se pudo leer, NO se guarda (se vuelve a medir la próxima vez en lugar de quedarse con un valor malo).
         if (escala <= 0f) {
@@ -366,6 +416,8 @@ object CarPlayPestana {
         val r = Root.ejecutarCada(listOf(ProtocoloCarPlay.cmdBuscarTarea(d.paquete))) ?: return
         val t = ProtocoloCarPlay.leerTarea(r[0].salida) ?: return
         tarea = t
+        hayVentana = true
+        vigilarPantalla()
         asegurarFuera(t, anchoP, altoP)
     }
 

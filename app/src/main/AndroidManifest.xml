@@ -26,6 +26,10 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_LOCATION" />
+    <!-- Antirrobo del teléfono (Vigilancia.kt): fotos y audio con la pantalla apagada -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
     <!-- Modo moto: abrir el tablero sola al montar el teléfono ("Mostrar sobre otras apps") -->
     <uses-permission android:name="android.permission.SYSTEM_ALERT_WINDOW" />
@@ -139,7 +143,7 @@
         <service
             android:name=".ServicioMoto"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice|location" />
+            android:foregroundServiceType="connectedDevice|location|camera|microphone" />
 
         <!-- Ahorro nocturno: su alarma y los eventos del sistema que obligan a recalcular el horario.
              No exportado: solo Android (o esta app) le puede mandar algo -->

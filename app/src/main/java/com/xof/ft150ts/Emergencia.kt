@@ -49,7 +49,7 @@ object Emergencia {
     /** No dos avisos seguidos. */
     private const val PAUSA_MS = 5 * 60_000L
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var app: Context? = null
     private var prefs: SharedPreferences? = null
     private var ultimaVelAlta = 0L

@@ -82,7 +82,7 @@ object Nocturno {
     /** Con la pantalla apagada, cuánto esperar antes de volver a mandar a Doze y dormir la app. */
     private const val VOLVER_A_DORMIR_MS = 5 * 60_000L
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private val candado = Mutex()
     private var app: Context? = null
     private var prefs: SharedPreferences? = null

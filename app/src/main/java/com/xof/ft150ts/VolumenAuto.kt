@@ -32,7 +32,7 @@ object VolumenAuto {
 
     private var prefs: SharedPreferences? = null
     private var am: AudioManager? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + Seguro.manejador)
     private var ciclo: Job? = null
     private var logica: VolumenProgresivo? = null
     /** Volumen que tenías antes de que la función lo moviera (-1 = no se ha guardado). */

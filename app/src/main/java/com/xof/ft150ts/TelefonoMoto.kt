@@ -85,7 +85,7 @@ object TelefonoMoto {
     private var hilo: HandlerThread? = null
     private var h: Handler? = null
     private val principal = Handler(Looper.getMainLooper())
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private val estimador = EstimadorRpm()
 
     // ---- Todo lo de abajo solo se toca en el hilo "vibracion" ----
@@ -298,7 +298,7 @@ object TelefonoMoto {
 
         // ¿Motor prendido? Con el cable de la moto como "switch": sin cable (moto apagada) no hay motor,
         // aunque el teléfono sienta vibración (en la mano, en la mesa, caminando...)
-        val switchPrendido = !soloConCable.value || Energia.cargando.value || NfcMoto.presente.value
+        val switchPrendido = !soloConCable.value || Energia.cargaDeMoto() || NfcMoto.presente.value
         val u = umbral.value
         if (!switchPrendido) {
             if (motor) { motor = false; apagarMotor() }

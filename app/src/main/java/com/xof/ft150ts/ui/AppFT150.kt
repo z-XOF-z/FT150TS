@@ -56,6 +56,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshotFlow
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -161,6 +162,8 @@ private fun Principal(
     // derivedStateOf + settledPage: esta pantalla entera no se recompone (ni pregunta al sistema quién es el inicio)
     // a media animación de cada cambio de pestaña, solo al llegar o salir del tablero
     val enTablero by remember { derivedStateOf { pager.settledPage == PAG_TABLERO } }
+    // Página asentada para la pantalla encendida (en el cajón de apps no se fuerza prendida)
+    LaunchedEffect(pager) { snapshotFlow { pager.settledPage }.collect { Lanzador.paginaActual.value = it } }
     val soyInicio = remember(enTablero) { Lanzador.esInicioPredeterminado(ctx) }
     BackHandler(enabled = !enTablero || soyInicio) {
         if (pager.currentPage != PAG_TABLERO) scope.launch { pager.animateScrollToPage(PAG_TABLERO) }

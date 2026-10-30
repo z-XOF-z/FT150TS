@@ -39,10 +39,18 @@ object BleManager {
     private val TELEM: UUID = UUID.fromString("6e400003-b5a3-f393-e0a9-e50e24dcca9e")
     private val CMD: UUID = UUID.fromString("6e400004-b5a3-f393-e0a9-e50e24dcca9e")
     private val RESP: UUID = UUID.fromString("6e400005-b5a3-f393-e0a9-e50e24dcca9e")
+    /** Firmware nuevo (OTA, firmware v1.6+). Opcional: las tarjetas viejas no la tienen. */
+    private val OTA: UUID = UUID.fromString("6e400006-b5a3-f393-e0a9-e50e24dcca9e")
     private val CCCD: UUID = UUID.fromString("00002902-0000-1000-8000-00805f9b34fb")
 
     /** true mientras la app está en pantalla (busca más rápido). */
     @Volatile var primerPlano = true
+        set(v) {
+            if (v && !field) rapidasFallidas = 0       // al volver a la app se busca rápido otra vez
+            val cambio = v != field
+            field = v
+            if (cambio && ::ctx.isInitialized) ajustarPrioridad()
+        }
 
     /**
      * Seguridad: el servicio de la moto usa los UUID del "Nordic UART", que traen miles de aparatos BLE.
@@ -63,6 +71,12 @@ object BleManager {
     private var gatt: BluetoothGatt? = null
     private var chNotif: BluetoothGattCharacteristic? = null
     private var chCmd: BluetoothGattCharacteristic? = null
+    private var chOta: BluetoothGattCharacteristic? = null
+    /** Lo llama la escritura de cada pedazo del firmware (true = la tarjeta lo recibió). Lo pone [OtaTarjeta]. */
+    @Volatile var alEscribirOta: ((Boolean) -> Unit)? = null
+    /** Tamaño útil de cada escritura (MTU negociado - 3). */
+    @Volatile var cargaMaxima = 20
+        private set
     private val handler = Handler(Looper.getMainLooper())
     private val cola = ArrayDeque<() -> Boolean>()
     private var ocupado = false
@@ -114,12 +128,21 @@ object BleManager {
     /** Busca la moto en este momento (p. ej. al conectar el cable de la moto), sin esperar el reintento. */
     fun buscarYa() {
         if (!::ctx.isInitialized) return
+        rapidasFallidas = 0
         handler.removeCallbacks(reintento)
         conectar()
     }
 
-    /** Busca rápido con la app en pantalla o con el teléfono cargando (probablemente en la moto). */
-    private fun rapido() = (primerPlano || Energia.cargando.value) && !ModoSueno.dormido.value
+    /**
+     * Búsquedas rápidas seguidas que no encontraron la tarjeta con la app al frente y sin cargar. Como la app es el
+     * launcher, antes buscaba en modo rápido (15 s de cada 18) todo el tiempo que veías tus apps, aunque la moto
+     * estuviera apagada. Tras [RAPIDAS_MAX] sigue buscando, pero en modo ahorro.
+     */
+    @Volatile private var rapidasFallidas = 0
+    private const val RAPIDAS_MAX = 4
+
+    /** Busca rápido con el teléfono cargando (probablemente en la moto) o el primer minuto con la app en pantalla. */
+    private fun rapido() = (Energia.cargaDeMoto() || (primerPlano && rapidasFallidas < RAPIDAS_MAX)) && !ModoSueno.dormido.value
 
     fun desconectar() {
         quiereConectar = false
@@ -134,6 +157,8 @@ object BleManager {
         gatt = null
         chNotif = null
         chCmd = null
+        chOta = null
+        alEscribirOta?.invoke(false)          // una actualización a medias se da por fallida
         cola.clear()
         ocupado = false
         respuesta.clear()
@@ -185,6 +210,7 @@ object BleManager {
     private val finEscaneo = Runnable {
         if (escaneando) {
             detenerEscaneo()
+            if (!Energia.cargaDeMoto()) rapidasFallidas++
             reintentar()
         }
     }
@@ -222,7 +248,7 @@ object BleManager {
         override fun onConnectionStateChange(g: BluetoothGatt, status: Int, newState: Int) {
             handler.post {
                 if (newState == BluetoothProfile.STATE_CONNECTED && status == BluetoothGatt.GATT_SUCCESS) {
-                    g.requestConnectionPriority(BluetoothGatt.CONNECTION_PRIORITY_HIGH)
+                    g.requestConnectionPriority(prioridadDeseada())
                     if (!g.requestMtu(247)) g.discoverServices()
                 } else {
                     g.close()
@@ -234,6 +260,7 @@ object BleManager {
         }
 
         override fun onMtuChanged(g: BluetoothGatt, mtu: Int, status: Int) {
+            if (status == BluetoothGatt.GATT_SUCCESS) cargaMaxima = (mtu - 3).coerceIn(20, 244)
             handler.post { g.discoverServices() }
         }
 
@@ -252,6 +279,7 @@ object BleManager {
                 }
                 chNotif = notif
                 chCmd = cmd
+                chOta = s.getCharacteristic(OTA)
                 encolar { activarNotificaciones(g, tel) }
                 encolar { activarNotificaciones(g, resp) }
                 // Primera tarjeta verificada: se fija
@@ -264,9 +292,13 @@ object BleManager {
                     try { g.device.createBond() } catch (_: Exception) { }
                 }
                 Moto.conexion.value = Conexion.CONECTADO
+                rapidasFallidas = 0
                 // Al conectar: pone la hora del teléfono en el reloj de la moto y pide el mantenimiento
                 val hora = SimpleDateFormat("yyyy-MM-dd HH:mm", Locale.US).format(Date())
                 Moto.comandoSilencioso("hora $hora")
+                // Telemetría rápida en binario (firmware v1.6+: 10 veces por segundo y 10 veces más chica).
+                // Una tarjeta vieja no lo entiende, contesta "No entendí" (no se muestra) y sigue mandando JSON.
+                Moto.comandoSilencioso("tel bin")
                 Moto.pedirMantenimiento()
                 FuncionesAvanzadas.pedirEstado()
             }
@@ -277,7 +309,10 @@ object BleManager {
         }
 
         override fun onCharacteristicWrite(g: BluetoothGatt, c: BluetoothGattCharacteristic, status: Int) {
-            handler.post { siguiente() }
+            handler.post {
+                if (c.uuid == OTA) alEscribirOta?.invoke(status == BluetoothGatt.GATT_SUCCESS)
+                siguiente()
+            }
         }
 
         // Android 13 o más nuevo
@@ -299,7 +334,8 @@ object BleManager {
     private fun recibir(uuid: UUID, v: ByteArray) {
         handler.post {
             when (uuid) {
-                TELEM -> Moto.recibirTelemetria(String(v, Charsets.UTF_8))
+                TELEM -> if (v.isNotEmpty() && v[0] == Protocolo.BIN_RAPIDA) Protocolo.parseRapidaBin(v)?.let { Moto.recibirRapida(it) }
+                    else Moto.recibirTelemetria(String(v, Charsets.UTF_8))
                 RESP -> {
                     if (v.size == 1 && v[0] == 4.toByte()) {          // fin de respuesta
                         Moto.recibirRespuesta(respuesta.toString())
@@ -369,6 +405,29 @@ object BleManager {
         val datos = texto.take(96).toByteArray(Charsets.UTF_8)
         encolar { chCmd?.let { escribir(it, datos) } ?: false }
         return true
+    }
+
+    /** ¿La tarjeta conectada tiene la característica para actualizar su firmware? */
+    fun puedeOta() = conectado() && chOta != null
+
+    /** Un pedazo del firmware nuevo (escritura confirmada: avisa en [alEscribirOta] cuando la tarjeta lo grabó). */
+    fun escribirOta(datos: ByteArray): Boolean {
+        if (!conectado() || chOta == null) return false
+        encolar { chOta?.let { escribir(it, datos) } ?: false }
+        return true
+    }
+
+    /**
+     * Prioridad de la conexión: ALTA en la moto, con la app a la vista o actualizando (respuesta rápida); si no,
+     * BALANCEADA (gasta menos batería con la moto prendida cerca y el teléfono en la bolsa).
+     */
+    private fun prioridadDeseada() =
+        if (Energia.enMoto.value || primerPlano || OtaTarjeta.activa.value) BluetoothGatt.CONNECTION_PRIORITY_HIGH
+        else BluetoothGatt.CONNECTION_PRIORITY_BALANCED
+
+    /** Vuelve a pedir la prioridad (al montar o quitar el teléfono, al empezar una actualización). */
+    fun ajustarPrioridad() {
+        handler.post { if (conectado()) try { gatt?.requestConnectionPriority(prioridadDeseada()) } catch (_: Exception) { } }
     }
 
     /** Texto que aparece en la fila de alertas del LCD (máx. 20 caracteres). */

@@ -40,6 +40,15 @@ private data class SenalMoto(val detectar: Boolean, val listo: Boolean, val carg
 object Energia {
     /** El teléfono está conectado a la corriente. */
     val cargando = MutableStateFlow(false)
+    /**
+     * Conectado a una computadora: el USB está "configurado" (una computadora lo reconoció como dispositivo). Carga,
+     * pero NO es la moto: antes conectarlo a la PC prendía el modo moto (tablero, saludo, zona WiFi...). Un cargador
+     * (el de la moto o uno de pared) nunca configura el USB.
+     */
+    val enComputadora = MutableStateFlow(false)
+    /** Carga que cuenta como "switch de la moto prendido": cualquier cargador, menos una computadora. */
+    fun cargaDeMoto() = cargando.value && !enComputadora.value
+
     /** Resultado: el teléfono está en la moto (con el switch prendido). */
     val enMoto = MutableStateFlow(false)
     /**
@@ -55,7 +64,7 @@ object Energia {
     val abrirAlMontar = MutableStateFlow(true)    // al montarlo, traer el tablero al frente
     val segundoPlano = MutableStateFlow(true)     // mantener la app viva (servicio con notificación)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var prefs: SharedPreferences? = null
     private var appCtx: Context? = null
     private var iniciado = false
@@ -74,6 +83,12 @@ object Energia {
             }
             // Recién conectado el cable: busca la moto ya, sin esperar el siguiente intento
             if (cargando.value && !antes) BleManager.buscarYa()
+        }
+    }
+
+    private val receptorUsb = object : BroadcastReceiver() {
+        override fun onReceive(c: Context?, i: Intent?) {
+            enComputadora.value = i?.getBooleanExtra("configured", false) == true
         }
     }
 
@@ -103,13 +118,21 @@ object Energia {
             cargando.value = enchufado(actual)
             actual?.let { Termico.bateria(it.getIntExtra(BatteryManager.EXTRA_TEMPERATURE, 0)); BateriaTel.desdeIntent(it) }
         } catch (_: Exception) { }
+        try {
+            // Aviso del sistema "pegajoso" (al registrarse regresa el estado actual del USB)
+            val usb = ContextCompat.registerReceiver(app, receptorUsb, IntentFilter(USB_STATE), ContextCompat.RECEIVER_NOT_EXPORTED)
+            enComputadora.value = usb?.getBooleanExtra("configured", false) == true
+        } catch (_: Exception) { }
         vigilar()
     }
 
     private fun vigilar() {
         scope.launch {
             val nfcYSueno = combine(NfcMoto.presente, ModoSueno.dormido) { nfc, dormido -> nfc to dormido }
-            combine(cargando, Moto.conexion, detectarCarga, requiereBle, nfcYSueno) { carga, con, detectar, ble, (nfc, dormido) ->
+            // La carga de una computadora no cuenta (al conectarla, el USB se configura ~1 s después de que empieza a
+            // cargar: cabe en la espera de 2.5 s de abajo, así que no alcanza a prender el modo moto)
+            val cargaMoto = combine(cargando, enComputadora) { c, pc -> c && !pc }
+            combine(cargaMoto, Moto.conexion, detectarCarga, requiereBle, nfcYSueno) { carga, con, detectar, ble, (nfc, dormido) ->
                 val motoBle = con == Conexion.CONECTADO || con == Conexion.DEMO
                 // La etiqueta NFC del soporte cuenta sola (aunque no esté cargando). Dormida (modo sueño) no cuenta nada.
                 SenalMoto(detectar || nfc, !dormido && ((detectar && carga && (!ble || motoBle)) || nfc), carga && detectar, dormido)
@@ -154,11 +177,13 @@ object Energia {
     }
 
     private const val VEL_RODANDO = 8f
+    private const val USB_STATE = "android.hardware.usb.action.USB_STATE"
 
     private fun ponerEnMoto(v: Boolean, apagoSwitch: Boolean = false) {
         if (enMoto.value == v) return
         android.util.Log.i("FT150-EN", "modo moto: $v (apagó switch: $apagoSwitch)")
         enMoto.value = v
+        BleManager.ajustarPrioridad()
         if (v) Encendido.alPrender() else if (apagoSwitch) Encendido.alApagar()
         val ctx = appCtx ?: return
         if (v) {

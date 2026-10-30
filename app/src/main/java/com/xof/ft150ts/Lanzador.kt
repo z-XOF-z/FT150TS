@@ -66,6 +66,10 @@ object Lanzador {
     val irAPagina = MutableStateFlow(-1 to 0L)
     /** Último pedido de página ya atendido (sobrevive a que se recree la pantalla al girar). */
     var paginaAtendida = 0L
+    /** Página que se está viendo (ya asentada). La usa la pantalla encendida: en el cajón de apps no se fuerza. */
+    val paginaActual = MutableStateFlow(PAGINA_TABLERO)
+    /** Último toque en la pantalla (elapsedRealtime). */
+    val ultimoToque = MutableStateFlow(android.os.SystemClock.elapsedRealtime())
     val cargando = MutableStateFlow(false)
 
     private var cargadoEn = 0L

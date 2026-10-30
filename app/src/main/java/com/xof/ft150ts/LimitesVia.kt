@@ -32,7 +32,7 @@ data class LimiteVia(val kmh: Int, val estimado: Boolean, val nombre: String, va
 object LimitesManager {
     val limite = MutableStateFlow<LimiteVia?>(null)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var iniciado = false
     private var consultando = false
     private var latC = 0.0

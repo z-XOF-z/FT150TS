@@ -35,7 +35,7 @@ object Baches {
     val sensibilidad = MutableStateFlow(1)         // 0 baja, 1 media, 2 alta
 
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private val avisados = HashMap<Long, Long>()   // llave del bache (su lugar) -> cuándo se avisó
     /** Dónde y cuándo se dio cada aviso reciente (para no repetir en la misma cuadra). */
     private val avisosRecientes = ArrayDeque<Triple<Double, Double, Long>>()
@@ -86,6 +86,23 @@ object Baches {
             actual.mapIndexed { k, b -> if (k == i) b.copy(fuerza = max(b.fuerza, fuerza), golpes = b.golpes + 1, ultimo = ahora) else b }
         } else {
             (actual + Bache(l.latitude, l.longitude, fuerza, 1, ahora)).takeLast(MAX)
+        }
+        if (ahora - ultimoGuardado > 30_000) guardar()
+    }
+
+    /**
+     * Bache que detectó la tarjeta (su IA de baches, firmware v1.6+) con SU GPS (o el que le prestó el teléfono).
+     * Se junta con los del teléfono: mismo mapa y mismos avisos.
+     */
+    fun registrarDeTarjeta(lat: Double, lon: Double, fuerza: Float) {
+        if (!activo.value || lat.isNaN() || lon.isNaN() || (lat == 0.0 && lon == 0.0)) return
+        val actual = lista.value
+        val i = actual.indexOfFirst { distanciaM(it.lat, it.lon, lat, lon) < 20.0 }
+        val ahora = System.currentTimeMillis()
+        lista.value = if (i >= 0) {
+            actual.mapIndexed { k, b -> if (k == i) b.copy(fuerza = max(b.fuerza, fuerza), golpes = b.golpes + 1, ultimo = ahora) else b }
+        } else {
+            (actual + Bache(lat, lon, fuerza, 1, ahora)).takeLast(MAX)
         }
         if (ahora - ultimoGuardado > 30_000) guardar()
     }

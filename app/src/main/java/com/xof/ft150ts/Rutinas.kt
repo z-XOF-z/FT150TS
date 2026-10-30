@@ -33,7 +33,7 @@ object Rutinas {
     val viajes = MutableStateFlow(0)
 
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default + Seguro.manejador)
     private var ciclo: Job? = null
     /** Para avisar "vas tarde" una sola vez por destino y día. */
     private var avisado = ""

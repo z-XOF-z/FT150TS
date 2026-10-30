@@ -45,7 +45,7 @@ object BluetoothAdmin {
     private var prefs: SharedPreferences? = null
     private var adapter: BluetoothAdapter? = null
     private val conectadosAcl = HashSet<String>()
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private var registrado = false
 
     private val receptor = object : BroadcastReceiver() {

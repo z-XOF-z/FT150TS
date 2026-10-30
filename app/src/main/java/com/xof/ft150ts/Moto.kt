@@ -69,7 +69,7 @@ object Moto {
 
     private lateinit var prefs: SharedPreferences
     private var appCtx: Context? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var demoJob: Job? = null
     private var iniciado = false
     private var errores = 0
@@ -99,6 +99,9 @@ object Moto {
         avisosVoz.value = prefs.getBoolean("avisosVoz", false)
 
         BleManager.iniciar(app)
+        PlacaB.iniciar(app)
+        Vigilancia.iniciar(app)
+        Voltajes.iniciar(app)
         UbicacionManager.iniciar(app)
         MusicaManager.iniciar(app)
         Voz.iniciar(app)
@@ -167,6 +170,11 @@ object Moto {
                 // El aviso usa la velocidad de la moto o una del GPS que sea creíble (no la de rebote bajo techo)
                 revisarVelocidad(if (conectada && r.vel >= 0) r.vel else UbicacionManager.velocidadConfiableKmh())
                 tick++
+                // Cada 10 s: la luz del teléfono a la tarjeta (la placa B no tiene LDR: brillo del LCD y los LEDs)
+                if (tick % 20 == 0 && conexion.value == Conexion.CONECTADO && config.value?.placaB == true) {
+                    val luz = PlacaB.luzPorciento(Luz.lux.value)
+                    if (luz >= 0) comandoSilencioso("luz $luz", esperaRespuesta = false)
+                }
                 if (tick % 2 != 0) continue
                 if (vel < 0 && !conectada) continue   // nada que guardar
                 historialVel.value = (historialVel.value + max(0f, vel)).takeLast(MUESTRAS)
@@ -227,6 +235,14 @@ object Moto {
         }
     }
 
+    private fun fmt1(x: Double) = String.format(java.util.Locale.US, "%.1f", x)
+
+    /** Aviso que ya viene de la tarjeta (ella ya lo puso en su LCD): solo en el tablero y, si quieres, en voz alta. */
+    fun avisoLocal(textoPantalla: String, textoVoz: String = textoPantalla) {
+        ultimaNotif.value = textoPantalla
+        if (avisosVoz.value) Voz.decir(textoVoz)
+    }
+
     /** Aviso de la app (lluvia, etc.): se ve en el tablero, va al LCD y, si quieres, se dice en voz alta. */
     fun aviso(textoPantalla: String, textoVoz: String = textoPantalla) {
         ultimaNotif.value = textoPantalla
@@ -283,11 +299,7 @@ object Moto {
         try {
             val j = JSONObject(texto)
             when (j.optString("k")) {
-                "t" -> {
-                    val r = Protocolo.parseRapida(j)
-                    rapida.value = r
-                    Estadisticas.muestra(r)
-                }
+                "t" -> recibirRapida(Protocolo.parseRapida(j))
                 "s" -> {
                     val e = Protocolo.parseEstado(j)
                     estado.value = e
@@ -297,6 +309,10 @@ object Moto {
                 }
                 "x" -> viaje.value = Protocolo.parseViaje(j)
                 "d" -> FuncionesAvanzadas.recibirDiagnostico(j)
+                "m" -> Vigilancia.movimientoExterno()              // la tarjeta sintió que movieron la moto
+                "b" -> Baches.registrarDeTarjeta(j.optDouble("la"), j.optDouble("lo"), j.optDouble("f", 0.0).toFloat())
+                "g" -> avisoLocal("Cargaste ~${fmt1(j.optDouble("l", 0.0))} L de gasolina" +
+                    (if (j.optDouble("kl", 0.0) > 0) " · rendiste ${fmt1(j.optDouble("kl"))} km/L" else ""))
                 "a" -> iphoneMusica.value = Protocolo.parseIphoneMusica(j, SystemClock.elapsedRealtime())
                 "c" -> iphoneLlamada.value = Protocolo.parseIphoneLlamada(j)
                 "i" -> {
@@ -315,6 +331,15 @@ object Moto {
         }
     }
 
+    /** Mensaje rápido de la tarjeta (JSON "t" o, firmware v1.6+, el binario de 10 por segundo). */
+    fun recibirRapida(r: Rapida) {
+        PlacaB.alRecibir(rapida.value, r)
+        rapida.value = r
+        Estadisticas.muestra(r)
+        errores = 0
+        datosMalos.value = false
+    }
+
     /** Datos calculados por el teléfono (sin la tarjeta). Solo cuentan para estadísticas si el motor va prendido o rodando. */
     fun recibirTelefono(r: Rapida) {
         rapida.value = r
@@ -323,7 +348,16 @@ object Moto {
 
     fun recibirRespuesta(texto: String) {
         val mostrar = pendientes.removeFirstOrNull() ?: true
+        // Herramientas de la tarjeta (firmware v1.6+): registros de la SD (el texto va tal cual, sin recortar),
+        // actualización del firmware y WiFi de casa / Telegram
+        if (texto.startsWith("@SD")) { RegistrosTarjeta.recibir(texto); return }
         val limpio = texto.trimEnd()
+        if (OtaTarjeta.recibir(limpio)) return
+        if (limpio.startsWith("{\"casa\"")) { Protocolo.parseCasa(limpio)?.let { CasaTarjeta.estado.value = it }; return }
+        if (PlacaB.recibir(limpio)) return
+        val json = limpio.startsWith("{") || limpio.startsWith("[")
+        if (RegistrosTarjeta.esperando() && !json) { RegistrosTarjeta.recibir(limpio); return }   // "Sin tarjeta SD." etc.
+        if (CasaTarjeta.recibir(limpio)) return
         if (limpio.startsWith("[")) {
             Protocolo.parseMant(limpio)?.let { mant.value = it }
             return

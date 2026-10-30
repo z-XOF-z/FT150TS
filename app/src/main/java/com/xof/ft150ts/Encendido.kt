@@ -48,6 +48,7 @@ object Encendido {
     fun alApagar(ahora: Long = System.currentTimeMillis()) {
         apagadaDesde = ahora
         ZonaWifi.alApagar()
+        Vigilancia.alApagarMoto()        // antirrobo del teléfono: se arma en 2 min si nadie lo mueve
         if (musica.value && MusicaManager.musica.value.reproduciendo) {
             if (atenuarSeg.value <= 0 || am == null) { MusicaManager.pausar(); pausadaPorMi = ahora }
             else atenuarYPausar()

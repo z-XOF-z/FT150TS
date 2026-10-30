@@ -27,7 +27,7 @@ object ModoRendimiento {
     val soportado = MutableStateFlow(true)
 
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     /** (mínima, piso para CarPlay) de la GPU; null = sin control de la GPU. Se lee una vez. */
     @Volatile private var gpu: Pair<Long, Long>? = null
     @Volatile private var gpuLeida = false

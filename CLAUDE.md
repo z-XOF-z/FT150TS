@@ -8,7 +8,7 @@ App Android (`app/`, Kotlin + Compose, paquete `com.xof.ft150ts`) + firmware ESP
 - App: `export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"; ./gradlew :app:testDebugUnitTest :app:assembleRelease`
 - Instalar: `adb install -r app/build/outputs/apk/release/app-release.apk`
 - Publicar: `docs/RELEASE.md`. Esta carpeta no es repo git: el código se sube a `z-XOF-z/FT150TS` con un clon aparte, y el APK como release.
-- Firmware: core esp32 **3.2.1** (no 3.3), ESP32S3 Dev Module, Huge APP.
+- Firmware: core esp32 **3.2.1** (no 3.3), ESP32S3 Dev Module, Flash 16MB, PSRAM OPI, particiones "16M Flash (3MB APP/9.9MB FATFS)" (OTA desde la app; antes Huge APP). arduino-cli: `--fqbn esp32:esp32:esp32s3:PartitionScheme=app3M_fat9M_16MB,FlashSize=16M,PSRAM=opi,CDCOnBoot=cdc`.
 - Placas: Python de KiCad 10 → `pcb/generar_pcb.py B --rutear`, `pcb/extras/generar_extra.py E|F`.
 
 ## Reglas

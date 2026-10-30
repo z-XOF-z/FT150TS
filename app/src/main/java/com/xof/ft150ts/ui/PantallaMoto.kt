@@ -84,7 +84,8 @@ fun PantallaMoto() {
                     SeccionBateriaTel(); SeccionLogros()
                 }
                 Columna(Modifier.weight(1f)) {
-                    SeccionGasolina(); Mantenimientos(); SeccionArrancones(); SeccionVelocimetro(); SeccionControl(); SeccionTarjeta(); Consola()
+                    SeccionGasolina(); Mantenimientos(); SeccionArrancones(); SeccionVelocimetro(); SeccionControl(); SeccionTarjeta()
+                    SeccionEstadoMoto(); SeccionBaterias(); SeccionPlacaB(); SeccionAntirrobo(); SeccionHerramientasTarjeta(); SeccionCasa(); Consola()
                 }
             }
         } else {
@@ -92,7 +93,7 @@ fun PantallaMoto() {
                 SeccionViaje(); SeccionRodadas(); SeccionSensores(); SeccionManejo(); SeccionAltitud(); SeccionRalenti(); Graficas()
                 SeccionBateriaTel()
                 SeccionGasolina(); Mantenimientos(); SeccionArrancones(); SeccionVelocimetro(); SeccionLogros()
-                SeccionControl(); SeccionTarjeta(); Consola()
+                SeccionControl(); SeccionTarjeta(); SeccionEstadoMoto(); SeccionBaterias(); SeccionPlacaB(); SeccionAntirrobo(); SeccionHerramientasTarjeta(); SeccionCasa(); Consola()
             }
         }
     }

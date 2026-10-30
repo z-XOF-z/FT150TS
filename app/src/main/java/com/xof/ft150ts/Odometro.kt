@@ -51,7 +51,7 @@ object OdometroTel {
     val altura = MutableStateFlow(Altura())
 
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var diaHoy = 0
     private var ant: Location? = null
     private var ultimoGuardado = 0L

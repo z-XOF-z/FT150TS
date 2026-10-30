@@ -72,7 +72,7 @@ object Actualizador {
     private const val MAX_APK = 60L * 1024 * 1024
 
     val estado = MutableStateFlow<EstadoActualizacion>(EstadoActualizacion.Nada)
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private var app: Context? = null
 
     private val resultado = object : BroadcastReceiver() {

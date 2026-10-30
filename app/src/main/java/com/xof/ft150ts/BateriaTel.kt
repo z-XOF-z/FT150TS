@@ -39,7 +39,7 @@ object BateriaTel {
 
     private var ctx: Context? = null
     private var bm: BatteryManager? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var avisoCable = 0L
     private var avisoBaja = 0L
 

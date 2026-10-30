@@ -57,7 +57,7 @@ object ModoSueno {
     /** Ya arrancó (si la app no está corriendo, no hay nada que dormir). */
     val listo: Boolean get() = iniciado
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private val principal = Handler(Looper.getMainLooper())
     private var prefs: SharedPreferences? = null
     private var sm: SensorManager? = null

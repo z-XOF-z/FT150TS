@@ -56,7 +56,7 @@ object Logros {
     val nuevo = MutableStateFlow<Logro?>(null)
 
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var temasVistos = mutableSetOf<String>()
     private var iniciado = false
 

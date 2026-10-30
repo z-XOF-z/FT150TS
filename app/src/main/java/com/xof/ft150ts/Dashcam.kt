@@ -62,7 +62,7 @@ object Dashcam {
     private var vigilante: Job? = null
     private var corte: Job? = null
     private var subtitulos: Job? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private const val SEGMENTO_MS = 60_000L
 
     fun iniciar(c: Context) {

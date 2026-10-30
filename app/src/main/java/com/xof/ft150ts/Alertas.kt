@@ -81,7 +81,7 @@ object AlertasManager {
     val conSismos = MutableStateFlow(true)
 
     private lateinit var ctx: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var descargando = false
     private val avisadas = HashMap<String, Pair<Int, Long>>()   // clave -> (nivel, cuándo)
     private const val CANAL = "alertas"

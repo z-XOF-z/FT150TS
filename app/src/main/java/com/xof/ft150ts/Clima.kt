@@ -69,7 +69,7 @@ object ClimaManager {
     val error = MutableStateFlow("")
 
     private lateinit var ctx: Context
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var latCarga = 0.0
     private var lonCarga = 0.0
     private var avisoLluvia = 0L

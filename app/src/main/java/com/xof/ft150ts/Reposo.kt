@@ -39,7 +39,7 @@ object Reposo {
     val quietoDesde = MutableStateFlow(0L)
     val ultimoEvento = MutableStateFlow("")
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private val principal = Handler(Looper.getMainLooper())
     private var prefs: SharedPreferences? = null
     private var sm: SensorManager? = null

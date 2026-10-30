@@ -50,7 +50,7 @@ object Rodadas {
     private const val MAX = 60
     private var ctx: Context? = null
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
 
     // grabación en curso
     private val puntos = ArrayList<PuntoRodada>()

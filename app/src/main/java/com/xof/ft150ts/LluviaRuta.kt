@@ -37,7 +37,7 @@ object LluviaRuta {
 
     private val DISTANCIAS = intArrayOf(0, 4, 8, 12, 16)
     private var prefs: SharedPreferences? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var iniciado = false
     private var ultimaConsulta = 0L
     private var ultimoAviso = 0L

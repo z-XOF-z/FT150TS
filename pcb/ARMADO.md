@@ -63,15 +63,15 @@ Los colores de los cables cambian según el año de la moto. **Confirma cada cab
 |---|---|---|
 | J1 | 12V MOTO: + - | + directo de la batería, con **fusible de línea de 3 A** cerca de la batería, y − a chasis. Es corriente fija: la placa se queda despierta para el anti-robo y se duerme sola |
 | J5 | LLAVE GND | Cable que tiene 12 V **solo con la llave en ON** |
-| J6 | ENT1 ENT2 ENT3 GND | ENT1 = cable del **foco de neutral** (en neutral se va a tierra). ENT2 y ENT3 quedan libres (freno, direccionales…). Aceptan de 3.3 a 16 V |
+| J6 | ENT1 ENT2 ENT3 GND | ENT1 = cable del **foco de neutral** (en neutral se va a tierra). ENT2 = cable de la **luz de freno** (12 V al frenar). ENT3 = las **dos direccionales**, cada una con un diodo 1N4007 (raya hacia ENT3): así cabe en una sola entrada y la tarjeta avisa si se te olvida prendida. Aceptan de 3.3 a 16 V |
 | J4 | BOBINA GND | Cable de disparo de la bobina (el que va del CDI a la bobina) y tierra. Ahí hay cientos de volts: aísla bien |
 | J18 | CDI PARO CHASIS | Cable de paro ("kill") del CDI, el que se va a tierra al apagar con el switch del manubrio. **Solo si armaste el corte de chispa** |
 | J10 | GAS GND | Cable del flotador de la gasolina |
 | J7 | HALL 5V 3V3 G S | Sensor Hall de velocidad (en la rueda o en el piñón) |
 | J8 | QS GND | Sensor de la palanca para el quickshifter (opcional) |
 | J9 | DS18B20 5V 3V3 G D | Sensor de temperatura |
-| J11 | LDR 3V3 S | Fotorresistencia, para el brillo automático |
-| J12 | I2C 3V3 G SDA SCL | MPU6050, RTC o la **placa E** (expansión) |
+| J11 | LDR 3V3 S | **INT del MPU6050** al pin S (alarma de movimiento: despierta a la tarjeta dormida si mueven la moto). La LDR ya no va: el brillo lo toma del sensor de luz del teléfono. Si prefieres la LDR, pon `PIN_MPU_INT = -1` en el firmware |
+| J12 | I2C 3V3 G SDA SCL | MPU6050, RTC o la **placa E** (expansión). El MPU6050 va aquí (3V3, G, SDA, SCL) y su INT a J11 |
 | J13 | LCD 5V G SDA SCL | Pantalla LCD 20x4 con su módulo I2C |
 | J14 | BOTONES ARR ABA OK G | 3 botones a tierra |
 | J15 | SD 5V G CS MO CK MI | Módulo de tarjeta micro SD |
@@ -88,21 +88,23 @@ Los colores de los cables cambian según el año de la moto. **Confirma cada cab
 |---|---|---|---|
 | 1 | Voltaje de la moto (100k/22k) | 17 | Hall (velocidad) |
 | 2 | Gasolina | 18 | Neutral (opto: **en neutral lee HIGH**) |
-| 3 | Entrada 2 | 21 | Llave ON |
+| 3 | Entrada 2 (freno) | 21 | Llave ON |
 | 4 | Voltaje de la celda (100k/100k) | 38 | Relevador 2 |
-| 5 | LDR | 39 | Tira de LEDs |
+| 5 | INT del MPU6050 (alarma; antes LDR) | 39 | Tira de LEDs |
 | 6, 7, 15 | Botones | 40 | Relevador 1 (anti-robo) |
 | 8, 9 | I2C SDA / SCL | 41, 42 | GPS RX / TX |
 | 10–13 | Tarjeta SD | 43 | Activa la carga de la celda |
 | 14 | DS18B20 | 44 | Salida aislada |
 | 16 | RPM | 45 | Relevador 3 |
-| 46 | Entrada 3 | 47 | Corte de chispa |
+| 46 | Entrada 3 (direccionales) | 47 | Corte de chispa |
 | 48 | Quickshifter (ojo: en la copia N16R8 también lleva el LED RGB de la placa) | | |
 
-**Pendiente en el firmware v1.5:** todavía usa los pines de antes. Cuando llegue la placa hay que cambiar:
-- `NEUTRAL_ACTIVO_BAJO = false`.
-- `PIN_CORTE_CHISPA = 47`.
-- Agregar los relevadores 2 y 3, la carga, las entradas 2 y 3 y la salida aislada.
+**Firmware v1.6:** ya usa estos pines (relevadores 40/38/45, carga en 43, entradas 21/18/3/46, salida en 44, corte de chispa en 47, quickshifter en 48, `NEUTRAL_ACTIVO_BAJO = false`). Lo que hace cada pin nuevo:
+- **ENT2 (GPIO3):** freno. Cuenta las frenadas y solo marca "frenada fuerte" si de verdad frenaste (un bache no cuenta).
+- **ENT3 (GPIO46):** direccionales. Si llevas más de 20 s rodando (arriba de 15 km/h) con una prendida, el LCD dice "DIRECCIONAL PRENDIDA", la tira de LEDs parpadea en ámbar y la app te avisa.
+- **Relevadores 2 y 3 y la salida aislada:** los prendes desde la app (Moto > Placa de la moto), con el nombre que quieras y apagado automático opcional. La alarma puede usar uno como sirena.
+- **GPIO43:** la celda se carga sola con el motor prendido, o sin motor si la batería de la moto está bien y la celda baja.
+- **GPIO5 (J11):** INT del MPU6050 para la alarma de movimiento.
 
 ## 5. Antes de subirla a la moto
 - [ ] TP1, TP2 y TP3 con los voltajes correctos.

@@ -4,9 +4,12 @@
    ESP32-S3 DevKitC-1  +  LCD 20x4 I2C
    Versión 1.2 (con app Android e iPhone por Bluetooth)
   ================================================================
-   Placa en Arduino IDE: "ESP32S3 Dev Module"  (core esp32 3.x)
-   Partition Scheme:     "Huge APP (3MB No OTA/1MB SPIFFS)"
-                         (WiFi + Bluetooth no caben en la partición normal)
+   Placa en Arduino IDE: "ESP32S3 Dev Module"  (core esp32 3.2.1; NO 3.3)
+   Flash Size:           16MB · PSRAM: "OPI PSRAM" (N16R8)
+   Partition Scheme:     "16M Flash (3MB APP/9.9MB FATFS)"  (desde v1.6)
+                         Dos copias del firmware de 3 MB: así la app lo puede actualizar por Bluetooth (OTA).
+                         (Antes "Huge APP", que no tiene segunda copia. Cambiar de esquema borra lo guardado en la
+                          tarjeta la primera vez: odómetro, calibraciones.)
    USB CDC On Boot:      Enabled (para ver el Serial por el USB nativo)
 
    Librerías (Library Manager):
@@ -36,34 +39,26 @@
      Pantalla "IPHONE": OK = play/pausa, OK largo = siguiente canción.
      Llamada entrante: OK = contestar, OK largo = colgar/rechazar.
 
-   MAPA DE CONEXIONES (ESP32-S3 DevKitC-1)
-   GPIO1  <- batería 12V por divisor 100k/22k (+100nF a GND; 27k en el cableado viejo)
-   GPIO2  <- sensor de gasolina (divisor con resistencia fija a 3.3V)
-   GPIO4  <- 18650 por divisor 100k/100k
-   GPIO5  <- LDR a 3.3V + 10k a GND
-   GPIO6  <- botón ARRIBA (a GND)
-   GPIO7  <- botón ABAJO  (a GND)
-   GPIO15 <- botón OK     (a GND)
-   GPIO8  <> SDA: LCD 20x4, RTC DS3231, MPU6050 (AD0 a 3.3V -> 0x69)
-   GPIO9  <> SCL: mismos tres
-   GPIO10 -> SD CS     GPIO11 -> SD MOSI
-   GPIO12 -> SD SCK    GPIO13 <- SD MISO
-   GPIO14 <> DS18B20 DATA (4.7k a 3.3V)
-   GPIO16 <- RPM: salida del optoacoplador PC817 (bobina)
-   GPIO17 <- sensor Hall A3144 de velocidad
-   GPIO18 <- switch de neutral (por diodo 1N4148, cátodo al cable)
-   GPIO21 <- ignición/llave: salida de otro PC817 (LOW = llave ON)
-   GPIO39 -> tira WS2812B DIN (resistencia 330 ohm en serie)
-   GPIO40 -> módulo relevador (corte de motor)
-   GPIO41 <- TX del GPS NEO-6M
-   GPIO42 -> RX del GPS NEO-6M
+   MAPA DE CONEXIONES: PLACA BASE B v2.3 (pcb/diseno.py, guía pcb/ARMADO.md) con la ESP32-S3 N16R8 ancha
+   GPIO1  <- batería 12V por divisor 100k/22k (+100nF)          GPIO2  <- flotador de la gasolina (J10)
+   GPIO4  <- celda 3.7 V por divisor 100k/100k                  GPIO43 -> carga de la celda (alto = 5 V al TP4056)
+   GPIO5  <- INT del MPU6050 en el conector J11 "LDR" (alarma de movimiento; la luz la manda el teléfono)
+   GPIO6/7/15 <- botones ARRIBA / ABAJO / OK (a GND, J14)
+   GPIO8/9 <> I2C: LCD (J13, a 5 V por 2N7000), RTC DS3231, MPU6050 0x69 y la placa E (J12)
+   GPIO10-13 <> SD (J15)        GPIO14 <> DS18B20 (J9)        GPIO16 <- RPM (bobina, PC817, J4)
+   GPIO17 <- Hall (J7)          GPIO48 <- quickshifter (J8)    GPIO39 -> tira WS2812B (J17)
+   Entradas aisladas (PC817; el pin lee LOW cuando el cable tiene voltaje):
+   GPIO21 <- LLAVE (J5)   GPIO18 <- ENT1 neutral (J6)   GPIO3 <- ENT2 freno   GPIO46 <- ENT3 direccionales
+   GPIO40 -> relevador 1 (bloqueo anti-robo)   GPIO38 -> relevador 2   GPIO45 -> relevador 3   (alto = prendido)
+   GPIO44 -> salida aislada (J19)              GPIO47 -> corte de chispa (PC817 + IRF840, J18)
+   GPIO41 <- TX del GPS   GPIO42 -> RX del GPS (J16)
   ================================================================
 */
 
 // ================================================================
 // 0) INTERRUPTORES GENERALES
 // ================================================================
-#define MODO_SIMULADOR 1   // 1 = Velxio / Wokwi   0 = placa real en la moto
+#define MODO_SIMULADOR 0   // 1 = Velxio / Wokwi   0 = placa real en la moto (la copia para el simulador está en firmware/simulador_wokwi)
 // En modo simulador: sin íconos personalizados (el simulador no los dibuja),
 // sin WiFi, sin Bluetooth, sin dormir, y arranca directo en modo demo.
 
@@ -105,7 +100,11 @@
   #include <WiFi.h>
   #include <WebServer.h>
   #include <HTTPClient.h>
+  #include <NetworkClientSecure.h>
+  #include "certificados.h"        // raíces de api.telegram.org (bot de Telegram)
 #endif
+#include <Update.h>                // actualizar el firmware desde la app (OTA)
+#include <esp_ota_ops.h>
 #if USAR_BLE
   #include <BLEDevice.h>
   #include <BLEServer.h>
@@ -115,7 +114,7 @@
   #include <BLESecurity.h>
 #endif
 
-#define FW_VERSION "v1.5"
+#define FW_VERSION "v1.6"
 
 // ================================================================
 // 1) TAMAÑOS Y TIPOS
@@ -178,12 +177,19 @@ bool iosMusica(uint8_t comando);
 bool iosLlamada(uint8_t accion);
 void iosOlvidar();
 void filaTexto(uint8_t r, const char* txt);
+void bleEvento(const char* json);        // aviso corto a la app por Bluetooth (sección 29b)
+void bachesRevisar();                    // IA de baches (21f)
+void semanaSumarViaje(float km, float litros, float vmax);
+// Ojo: si una función tiene su prototipo escrito a mano, el IDE ya no lo genera solo; por eso van aquí arriba
+void irADormir(bool porTimer);
+String palabra(const String& s, int n);
+bool tgListo();
 
 enum Icono : uint8_t { ICO_BAT = 1, ICO_GAS, ICO_TEMP, ICO_ALERTA, ICO_BT, ICO_LLAVE, ICO_GPS };
 
 enum TipoEvento : uint8_t {
   EVT_CAIDA, EVT_FRENADA, EVT_ACELERON, EVT_ARRANQUE, EVT_CORTE,
-  EVT_SOBRE_RPM, EVT_BAT_BAJA, EVT_GAS_CRITICA, EVT_TEMP_ALTA, EVT_NO_CARGA, EVT_TOTAL
+  EVT_SOBRE_RPM, EVT_BAT_BAJA, EVT_GAS_CRITICA, EVT_TEMP_ALTA, EVT_NO_CARGA, EVT_MOVIDA, EVT_VIBRA, EVT_TOTAL
 };
 
 struct DatosMoto {
@@ -205,6 +211,10 @@ struct DatosMoto {
   int   sats    = 0;
   int   luz     = -1;    // 0-100
   bool  ignicion = false;
+  bool  freno = false;         // luz de freno prendida (ENT2)
+  bool  direccional = false;   // alguna direccional parpadeando (ENT3)
+  bool  dirOlvidada = false;   // la direccional lleva rato prendida rodando
+  bool  vibraAlerta = false;   // la IA de vibraciones vio algo raro
 };
 
 struct Boton {
@@ -251,6 +261,9 @@ struct Viaje {
 
 struct EventoReg { uint32_t epoch; uint8_t tipo; float valor; };
 
+// Un componente del "estado de la moto" (21f): 0-100 y qué hacer
+struct ItemSalud { const char* nombre; int puntos; String consejo; };
+
 // Todo lo que se guarda en la memoria interna (sobrevive apagones)
 struct Persistente {
   uint32_t magic;
@@ -292,11 +305,22 @@ class TextoPrint : public Print {
 // 2) CONFIGURACIÓN
 // ================================================================
 
-// ---------- Pines ESP32-S3 DevKitC-1 ----------
-const uint8_t PIN_ADC_BATERIA  = 1;    // divisor 100k/27k de la batería 12V
+// ---------- Pines: placa base B v2.3 ----------
+const uint8_t PIN_ADC_BATERIA  = 1;    // divisor 100k/22k de la batería 12V
 const uint8_t PIN_ADC_GASOLINA = 2;    // sensor de flotador (divisor)
-const uint8_t PIN_ADC_LIPO     = 4;    // divisor 100k/100k de la 18650
-const uint8_t PIN_ADC_LUZ      = 5;    // LDR + resistencia 10k
+const uint8_t PIN_ADC_LIPO     = 4;    // divisor 100k/100k de la celda
+const uint8_t PIN_ADC_LUZ      = 5;    // conector J11: LDR (si no está la INT del MPU, ver PIN_MPU_INT)
+// INT del MPU6050 (alarma de movimiento): al conector J11 "LDR" (GPIO5, ya trae 10k a tierra). Es de los pocos
+// pines que pueden despertar a la tarjeta dormida (0-21) que quedan en la placa B. Con esto la LDR no se usa: el
+// brillo automático toma la luz del sensor del teléfono (la app la manda). -1 = J11 con la LDR, sin alarma.
+const int8_t  PIN_MPU_INT      = 5;
+const uint8_t PIN_ENT2         = 3;    // entrada aislada 2 (J6): ver FUNCION_ENT2
+const uint8_t PIN_ENT3         = 46;   // entrada aislada 3 (J6): ver FUNCION_ENT3
+const uint8_t PIN_RELE2        = 38;   // relevador 2 (J72), alto = prendido
+const uint8_t PIN_RELE3        = 45;   // relevador 3 (J73), alto = prendido. Al arrancar debe estar en bajo: el
+                                       // LED del PC817 a tierra lo asegura (si no, la flash no arranca)
+const uint8_t PIN_SALIDA       = 44;   // salida aislada de colector abierto (J19, hasta 50 mA)
+const uint8_t PIN_CARGA        = 43;   // alto = 5 V de la moto al TP4056 (carga la celda)
 const uint8_t PIN_BTN_ARRIBA   = 6;
 const uint8_t PIN_BTN_ABAJO    = 7;
 const uint8_t PIN_BTN_OK       = 15;
@@ -309,24 +333,32 @@ const uint8_t PIN_SD_MISO      = 13;
 const uint8_t PIN_DS18B20      = 14;   // temperatura motor (pull-up 4.7k a 3.3V)
 const uint8_t PIN_RPM          = 16;   // salida del optoacoplador de la bobina
 const uint8_t PIN_HALL         = 17;   // sensor Hall de velocidad
-const uint8_t PIN_NEUTRAL      = 18;   // switch de neutral (con diodo)
+const uint8_t PIN_NEUTRAL      = 18;   // ENT1: cable del foco de neutral (optoacoplador)
 const uint8_t PIN_IGNICION     = 21;   // llave ON (optoacoplador)
 const uint8_t PIN_LEDS         = 39;   // tira WS2812B (shift light)
-const uint8_t PIN_RELE         = 40;   // relevador de corte de motor
+const uint8_t PIN_RELE         = 40;   // relevador 1: bloqueo anti-robo (corte de motor)
 const uint8_t PIN_GPS_RX       = 41;   // aquí llega el TX del GPS
 const uint8_t PIN_GPS_TX       = 42;   // va al RX del GPS
 const int8_t  PIN_BACKLIGHT_PWM = -1;  // 47 si quitas el jumper del backpack y usas transistor
 const int8_t  PIN_PERIF_EN      = -1;  // 3 si pones un MOSFET que apague GPS y LEDs al dormir
 
 // Corte de chispa (solo con USAR_CORTE_CHISPA 1). -1 = no instalado.
-const int8_t  PIN_CORTE_CHISPA  = -1;  // 47 en la placa base v2.1 (PC817 + IRF840 al cable de paro)
-const int8_t  PIN_QS_SENSOR     = -1;  // sugerido 38 o 48 (el que NO tenga el LED RGB de tu placa)
+const int8_t  PIN_CORTE_CHISPA  = 47;  // placa B: PC817 + IRF840 al cable de paro (solo se usa con USAR_CORTE_CHISPA 1)
+const int8_t  PIN_QS_SENSOR     = 48;  // placa B: J8 (ojo: en la copia N16R8 el GPIO48 también lleva el LED RGB)
 const bool CHISPA_ACTIVO_ALTO   = true;  // true = HIGH prende el IRF840 = cable de paro a tierra = sin chispa
 const bool QS_ACTIVO_BAJO       = true;  // el sensor de la palanca manda a tierra al pisar
 
 const bool RELE_ACTIVO_ALTO     = true;  // true = HIGH energiza el relevador
 const bool IGNICION_ACTIVA_BAJO = true;  // con optoacoplador: LOW = llave ON
-const bool NEUTRAL_ACTIVO_BAJO  = true;  // el switch manda a tierra en neutral
+// Placa B: el cable del foco de neutral tiene voltaje FUERA de neutral (prende el LED del PC817 = LOW) y en neutral
+// se va a tierra (LED apagado, el pin lee HIGH)
+const bool NEUTRAL_ACTIVO_BAJO  = false;
+
+// Qué está conectado en las entradas aisladas libres (J6). Solo hay dos, así que las DOS direccionales van juntas a
+// ENT3, cada una con su diodo 1N4007 (raya hacia ENT3): para avisar "dejaste la direccional" no importa el lado.
+enum FuncionEntrada : uint8_t { ENT_LIBRE, ENT_FRENO, ENT_DIRECCIONAL, ENT_LUZ_ALTA };
+const FuncionEntrada FUNCION_ENT2 = ENT_FRENO;         // cable de la luz de freno (12 V al frenar)
+const FuncionEntrada FUNCION_ENT3 = ENT_DIRECCIONAL;   // las dos direccionales con diodo (parpadean)
 
 // ---------- Direcciones I2C ----------
 const uint8_t LCD_DIR   = 0x27;        // <-- X si no prende prueba 0x3F
@@ -391,9 +423,13 @@ const uint32_t REFRESCO_LCD_MS     = 250;
 const uint32_t TICK_MS             = 100;
 const uint32_t FIN_VIAJE_MS        = 120000;   // llave apagada 2 min = fin de viaje
 const uint32_t TIEMPO_A_DORMIR_MS  = 300000;   // 5 min sin llave ni botones
-const uint32_t DESPERTAR_CADA_S    = 3600;     // revisa baterías cada hora dormido
+const uint32_t DESPERTAR_CADA_S    = 3600;     // revisa baterías cada hora dormido (con Telegram: lo que elijas, 15 min de fábrica)
+const float    BAT_GUARDA_V        = 11.8f;    // protector: abajo de esto (en reposo) despierta poco y no prende el WiFi
+const uint32_t DORMIR_GUARDA_S     = 4UL * 3600;
 const uint32_t LOG_BAT_MS          = 600000;
 const uint32_t NOTIF_MS            = 10000;
+const uint32_t DIR_OLVIDADA_MS     = 20000;    // rodando con la direccional prendida más de esto = se te olvidó
+const float    DIR_VEL_MIN         = 15.0f;    // abajo de esto no cuenta (esperando para dar vuelta)
 const uint32_t AVISO_MS            = 2000;
 
 // ---------- Red ----------
@@ -410,6 +446,7 @@ const char* BACKUP_URL  = "X";                 // <-- X ej. http://tuservidor/su
 #define BLE_TELEM    "6e400003-b5a3-f393-e0a9-e50e24dcca9e"   // ESP32 -> app: datos en JSON
 #define BLE_CMD      "6e400004-b5a3-f393-e0a9-e50e24dcca9e"   // app -> ESP32: comando de consola
 #define BLE_RESP     "6e400005-b5a3-f393-e0a9-e50e24dcca9e"   // ESP32 -> app: respuesta del comando
+#define BLE_OTA      "6e400006-b5a3-f393-e0a9-e50e24dcca9e"   // app -> ESP32: pedazos del firmware nuevo (OTA)
 
 const uint32_t MAGIC_NVS = 0xF150A001;
 const float RADIO_RUTA_M = 300.0f;
@@ -537,6 +574,22 @@ bool g_alertaDescMoto = false, g_alertaDescLipo = false;
 uint32_t g_ultBackupIntento = 0;
 bool g_wifiIniciado = false;
 
+// Placa B: entradas aisladas, relevadores 2 y 3, salida aislada y carga de la celda (sección 21c)
+uint32_t g_dirUltPulso = 0, g_dirRodandoMs = 0;  // último parpadeo de la direccional · tiempo rodando con ella prendida
+bool g_frenoAntes = false;
+uint32_t g_frenadas = 0;                         // veces que se pisó el freno desde que prendió la tarjeta
+uint32_t g_frenoUltimo = 0;                      // última vez que se vio la luz de freno
+bool g_rele2 = false, g_rele3 = false, g_salida = false;
+uint32_t g_rele2Hasta = 0, g_rele3Hasta = 0, g_salidaHasta = 0;  // apagado automático (0 = sin tiempo)
+bool g_cargando = false;
+// Luz que manda el teléfono (sin LDR): 0-100, -1 = nada reciente
+int g_luzApp = -1;
+uint32_t g_luzAppMs = 0;
+
+// Firmware nuevo desde la app (OTA, ver 28b): se está recibiendo
+volatile bool g_otaActivo = false, g_otaError = false;
+volatile uint32_t g_otaRecibido = 0, g_otaTotal = 0, g_otaUltimo = 0;
+
 // Simulaciones de demo
 uint32_t g_simCaidaHasta = 0, g_simFrenadaHasta = 0;
 
@@ -562,7 +615,7 @@ const char* TEXTO_SPLASH = "FT150";
 
 const char* NOMBRE_EVT[EVT_TOTAL] = {
   "caida", "frenada", "aceleron", "arranque", "corte",
-  "sobre_rpm", "bat_baja", "gas_critica", "temp_alta", "no_carga"
+  "sobre_rpm", "bat_baja", "gas_critica", "temp_alta", "no_carga", "movida", "vibra_rara"
 };
 const char* NOMBRE_VISTA[V_TOTAL] = {
   "principal", "iphone", "viaje", "comparar", "mantenimiento", "baterias", "diagnostico", "pista", "ajustes"
@@ -696,7 +749,8 @@ void registrarEvento(TipoEvento t, float valor) {
   uint32_t ms = millis();
   // Eventos instantáneos: máx 1 cada 10 s. Estados que duran (gasolina
   // crítica, motor caliente...): máx 1 cada 10 min para no llenar la SD.
-  bool estado = (t == EVT_GAS_CRITICA || t == EVT_TEMP_ALTA || t == EVT_BAT_BAJA || t == EVT_SOBRE_RPM || t == EVT_NO_CARGA);
+  bool estado = (t == EVT_GAS_CRITICA || t == EVT_TEMP_ALTA || t == EVT_BAT_BAJA || t == EVT_SOBRE_RPM || t == EVT_NO_CARGA ||
+                 t == EVT_VIBRA);
   uint32_t espera = estado ? 600000UL : 10000UL;
   if (g_evtUltimo[t] != 0 && ms - g_evtUltimo[t] < espera) return;
   g_evtUltimo[t] = ms;
@@ -734,8 +788,12 @@ void adcBegin() {
   analogSetPinAttenuation(PIN_ADC_BATERIA, ADC_11db);
   analogSetPinAttenuation(PIN_ADC_GASOLINA, ADC_11db);
   analogSetPinAttenuation(PIN_ADC_LIPO, ADC_11db);
+  if (!hayLdr()) return;
   analogSetPinAttenuation(PIN_ADC_LUZ, ADC_11db);
 }
+
+/** ¿J11 tiene la LDR? (con la INT del MPU ahí, ese pin NO se lee como analógico: se desconfiguraría la alarma) */
+bool hayLdr() { return PIN_MPU_INT != (int8_t)PIN_ADC_LUZ; }
 
 void adcActualizar() {
   uint32_t ms = millis();
@@ -744,7 +802,7 @@ void adcActualizar() {
   g_mvBat  = ema(g_mvBat,  leerMv(PIN_ADC_BATERIA, 8), 0.05f);
   g_mvGas  = ema(g_mvGas,  leerMv(PIN_ADC_GASOLINA, 8), 0.01f);
   g_mvLipo = ema(g_mvLipo, leerMv(PIN_ADC_LIPO, 4), 0.05f);
-  g_mvLuz  = ema(g_mvLuz,  leerMv(PIN_ADC_LUZ, 4), 0.05f);
+  if (hayLdr()) g_mvLuz = ema(g_mvLuz, leerMv(PIN_ADC_LUZ, 4), 0.05f);
 }
 
 float voltajeMoto() {
@@ -766,6 +824,8 @@ int porcentajeGas() {
 }
 
 int porcentajeLuz() {
+  // Sin LDR: la que mandó el teléfono en el último minuto (la app la manda cada 10 s)
+  if (!hayLdr()) return (g_luzApp >= 0 && millis() - g_luzAppMs < 60000) ? g_luzApp : -1;
   if (isnan(g_mvLuz)) return -1;
   return (int)constrain(g_mvLuz * 100.0f / 3300.0f, 0.0f, 100.0f);
 }
@@ -900,7 +960,19 @@ bool imuBegin() {
   imuEscribir(0x6B, 0x00);                // despertar
   imuEscribir(0x1C, 0x08);                // ±4 g
   imuEscribir(0x1A, 0x03);                // filtro pasa bajas ~44 Hz
+  imuEscribir(0x19, 9);                   // 100 muestras por segundo (las usa la IA de vibraciones por la FIFO)
+  imuEscribir(0x37, 0x20);                // pin INT: activo en alto y se queda prendido hasta leer INT_STATUS
+  imuEscribir(0x38, 0x00);                // sin interrupciones (la alarma las prende al estacionarse)
+  imuLeer(0x3A);
   return true;
+}
+
+uint8_t imuLeer(uint8_t reg) {
+  Wire.beginTransmission(MPU_DIR);
+  Wire.write(reg);
+  if (Wire.endTransmission(false) != 0) return 0;
+  if (Wire.requestFrom((uint8_t)MPU_DIR, (uint8_t)1) != 1) return 0;
+  return Wire.read();
 }
 
 void imuActualizar() {
@@ -930,6 +1002,7 @@ void imuActualizar() {
     datos.incl = degrees(acos(c));
   }
   datos.aFwd = (g_acc[EJE_ADELANTE] - P.imuRef[EJE_ADELANTE]) * SIGNO_ADELANTE;
+  bachesRevisar();
 }
 
 void imuCalibrar() {
@@ -959,7 +1032,9 @@ void revisarCaidasYFrenadas() {
   }
 
   // Frenada brusca / acelerón
-  if (datos.aFwd < -FRENADA_G && v > 15) {
+  // Con sensor de freno: solo cuenta si de verdad frenaste (un bache también da un jalón hacia atrás)
+  bool frenoReal = !hayFreno() || millis() - g_frenoUltimo < 1500;
+  if (datos.aFwd < -FRENADA_G && v > 15 && frenoReal) {
     if (g_frenDesde == 0) g_frenDesde = ms;
     if (ms - g_frenDesde > 250) registrarEvento(EVT_FRENADA, datos.aFwd);
   } else g_frenDesde = 0;
@@ -1269,9 +1344,11 @@ void viajeTerminar() {
   P.hoy.segMov += g_viaje.msMov / 1000;
   P.hoy.velMax = max(P.hoy.velMax, g_viaje.velMax);
   P.hoy.viajes++;
+  semanaSumarViaje(g_viaje.km, litros, g_viaje.velMax);
   if (g_viaje.km > 5 && litros > 0.1f && kmpl > 5 && kmpl < 120)
     P.kmPorLitro = P.kmPorLitro * 0.8f + kmpl * 0.2f;
 
+  ubicGuardar();                   // última ubicación conocida (Telegram /ubicacion)
   if (g_viaje.tieneInicioGps && datos.gpsFix)
     rutaRegistrar(g_viaje.latI, g_viaje.lonI, datos.lat, datos.lon,
                   (g_viaje.msMov + g_viaje.msParado) / 60000.0f, litros);
@@ -1308,6 +1385,10 @@ void viajeActualizar(uint32_t dt) {
     if (g_viaje.gasRef < 0) { g_viaje.gasRef = datos.gasPct; g_viaje.gasMin = datos.gasPct; }
     if (datos.gasPct < g_viaje.gasMin) g_viaje.gasMin = datos.gasPct;
     if (datos.gasPct > g_viaje.gasMin + 15) {
+      // Cargaste gasolina: avisa a la app cuánto y tu rendimiento aprendido
+      char ev[64];
+      snprintf(ev, sizeof ev, "{\"k\":\"g\",\"l\":%.1f,\"kl\":%.1f}", (datos.gasPct - g_viaje.gasMin) / 100.0f * TANQUE_LITROS, P.kmPorLitro);
+      bleEvento(ev);
       g_viaje.litrosAcum += (g_viaje.gasRef - g_viaje.gasMin) / 100.0f * TANQUE_LITROS;
       g_viaje.gasRef = datos.gasPct;
       g_viaje.gasMin = datos.gasPct;
@@ -1539,9 +1620,22 @@ void ledsActualizar() {
   uint32_t ms = millis();
   if (ms - g_ultLeds < 30) return;
   g_ultLeds = ms;
-  leds.clear();
   int rpm = datos.rpm;
-  if (rpm > 0 && (datos.ignicion || g_modoDemo)) {
+  // Apagada (motor apagado o sin llave): se manda a la tira una sola vez, no 33 veces por segundo
+  static bool apagada = false;
+  // Direccional olvidada: toda la tira parpadea en ámbar (se ve aunque no veas el LCD ni el teléfono)
+  bool avisoDir = datos.dirOlvidada && (datos.ignicion || g_modoDemo);
+  bool encender = (rpm > 0 && (datos.ignicion || g_modoDemo)) || avisoDir;
+  if (!encender && apagada) return;
+  apagada = !encender;
+  leds.clear();
+  if (avisoDir) {
+    leds.setBrightness(120);
+    if ((ms / 250) % 2) for (uint8_t i = 0; i < NUM_LEDS; i++) leds.setPixelColor(i, leds.Color(255, 140, 0));
+    leds.show();
+    return;
+  }
+  if (encender) {
     uint8_t brillo = 80;
     if (P.autoBrillo && datos.luz >= 0) brillo = map(datos.luz, 0, 100, 10, 120);
     leds.setBrightness(brillo);
@@ -1596,8 +1690,9 @@ void pistaReset() {
 // ================================================================
 // 21) CORTE DE MOTOR (relevador)
 // ================================================================
+extern bool g_llaveCerrada;
 void releAplicar() {
-  bool cortar = P.corteActivo || g_corteCaida;
+  bool cortar = P.corteActivo || g_corteCaida || g_llaveCerrada;   // llave de proximidad: hasta que llegue tu teléfono
   digitalWrite(PIN_RELE, (cortar == RELE_ACTIVO_ALTO) ? HIGH : LOW);
 }
 
@@ -1848,6 +1943,583 @@ int jsonDiagnostico(char* b, size_t n) {
 }
 
 // ================================================================
+// 21c) PLACA B: ENTRADAS AISLADAS, RELEVADORES 2 Y 3, SALIDA AISLADA Y CARGA DE LA CELDA
+// ================================================================
+void placaBegin() {
+  pinMode(PIN_ENT2, INPUT_PULLUP);       // el PC817 jala a tierra cuando el cable tiene voltaje
+  pinMode(PIN_ENT3, INPUT_PULLUP);
+  pinMode(PIN_RELE2, OUTPUT);  digitalWrite(PIN_RELE2, LOW);
+  pinMode(PIN_RELE3, OUTPUT);  digitalWrite(PIN_RELE3, LOW);
+  pinMode(PIN_SALIDA, OUTPUT); digitalWrite(PIN_SALIDA, LOW);
+  pinMode(PIN_CARGA, OUTPUT);  digitalWrite(PIN_CARGA, LOW);
+  if (PIN_MPU_INT >= 0) pinMode(PIN_MPU_INT, INPUT);   // la 10k de J11 lo deja en bajo
+}
+
+// Cada tick (100 ms): freno, direccionales y "dejaste la direccional"
+void entradasActualizar(uint32_t dt) {
+  uint32_t ms = millis();
+  const uint8_t pines[2] = {PIN_ENT2, PIN_ENT3};
+  const FuncionEntrada funciones[2] = {FUNCION_ENT2, FUNCION_ENT3};
+  bool freno = false;
+  for (uint8_t i = 0; i < 2; i++) {
+    bool voltaje = digitalRead(pines[i]) == LOW;
+    if (funciones[i] == ENT_FRENO && voltaje) freno = true;
+    if (funciones[i] == ENT_DIRECCIONAL && voltaje) g_dirUltPulso = ms;
+  }
+  if (g_modoDemo) return;                // el demo pone sus propios valores
+  datos.freno = freno;
+  if (freno) g_frenoUltimo = ms;
+  if (freno && !g_frenoAntes) g_frenadas++;
+  g_frenoAntes = freno;
+  // La direccional parpadea (~1.5 por segundo): cuenta como prendida si hubo destello en el último 1.2 s
+  datos.direccional = g_dirUltPulso != 0 && ms - g_dirUltPulso < 1200;
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (!datos.direccional) g_dirRodandoMs = 0;
+  else if (v > DIR_VEL_MIN) g_dirRodandoMs += dt;   // esperando en un alto no cuenta
+  datos.dirOlvidada = g_dirRodandoMs > DIR_OLVIDADA_MS;
+}
+
+/** ¿Hay sensor de freno? (para no contar baches como frenadas fuertes) */
+bool hayFreno() { return FUNCION_ENT2 == ENT_FRENO || FUNCION_ENT3 == ENT_FRENO; }
+
+bool alarmaSirenaAhora();
+uint8_t alarmaSirenaEn();
+
+// Relevadores 2 y 3 y la salida aislada: tuyos (luces, claxon...), desde la app. La alarma puede usar uno de sirena.
+void salidasAplicar() {
+  uint32_t ms = millis();
+  if (g_rele2Hasta && (int32_t)(ms - g_rele2Hasta) >= 0) { g_rele2 = false; g_rele2Hasta = 0; }
+  if (g_rele3Hasta && (int32_t)(ms - g_rele3Hasta) >= 0) { g_rele3 = false; g_rele3Hasta = 0; }
+  if (g_salidaHasta && (int32_t)(ms - g_salidaHasta) >= 0) { g_salida = false; g_salidaHasta = 0; }
+  bool sirena = alarmaSirenaAhora();
+  uint8_t s = alarmaSirenaEn();
+  digitalWrite(PIN_RELE2, (g_rele2 || (sirena && s == 2)) ? HIGH : LOW);
+  digitalWrite(PIN_RELE3, (g_rele3 || (sirena && s == 3)) ? HIGH : LOW);
+  digitalWrite(PIN_SALIDA, (g_salida || (sirena && s == 4)) ? HIGH : LOW);
+}
+
+void releJson(Print& out) { out.printf("{\"rl\":[%d,%d,%d]}\n", g_rele2, g_rele3, g_salida); }
+
+//  rele                          estado {"rl":[relevador2, relevador3, salida]}
+//  rele 2|3|s on [segundos] | off  (con segundos se apaga solo; el relevador 1 es el bloqueo: "corte")
+void releComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "") { releJson(out); return; }
+  bool* est; uint32_t* hasta;
+  if (c1 == "2") { est = &g_rele2; hasta = &g_rele2Hasta; }
+  else if (c1 == "3") { est = &g_rele3; hasta = &g_rele3Hasta; }
+  else if (c1 == "s" || c1 == "salida") { est = &g_salida; hasta = &g_salidaHasta; }
+  else { out.println(F("Usa: rele 2|3|s on [segundos] | off")); return; }
+  if (c2 == "on") {
+    uint32_t s = (uint32_t)palabra(low, 3).toInt();
+    *est = true;
+    *hasta = s ? millis() + min(s, (uint32_t)86400) * 1000UL : 0;
+  } else if (c2 == "off") { *est = false; *hasta = 0; }
+  else { out.println(F("Usa: rele 2|3|s on [segundos] | off")); return; }
+  salidasAplicar();
+  releJson(out);
+}
+
+// Carga de la celda (BD140 -> TP4056). Con el motor prendido el alternador sobra; sin motor solo si la batería de la
+// moto está bien y la celda baja. El TP4056 se corta solo al llenarla. Dormida, la 10k de la base la deja apagada.
+void cargaActualizar() {
+  float vl = datos.vLipo, vm = datos.vMoto;
+  if (g_modoDemo || isnan(vl) || isnan(vm)) g_cargando = false;
+  else if (!g_cargando) g_cargando = (g_motorEnc && vl < 4.10f) || (vm > 12.5f && vl < 3.80f);
+  else if (!(g_motorEnc || vm > 12.3f)) g_cargando = false;   // cargando, la celda marca el voltaje del cargador
+  digitalWrite(PIN_CARGA, g_cargando ? HIGH : LOW);
+}
+
+// ================================================================
+// 21d) ALARMA DE MOVIMIENTO (MPU6050 + su pin INT en J11)
+// ================================================================
+// Estacionada (sin llave 2 min) el MPU vigila solo: si alguien mueve la moto, su pin INT despierta a la tarjeta
+// (aunque esté dormida). Espera 20 s: si gira la llave eres tú. Si no: evento, mensaje por Telegram (si estás en el
+// WiFi de casa) y, si quieres, sirena con un relevador o la salida. Máximo una alarma cada 5 min.
+// Dormido, el MPU se queda en "modo ciclo" (mide 5 veces por segundo, ~70 µA).
+struct Alarma { uint32_t magic; bool activa; uint8_t sens; uint8_t sirena; };   // sirena: 0 nada, 2/3 relevador, 4 salida
+const uint32_t MAGIC_ALARMA = 0xF150A1A2;
+Alarma g_alarma;
+RTC_DATA_ATTR bool g_alarmaPausa = false;     // acaba de sonar dormida: el siguiente sueño no vigila
+RTC_DATA_ATTR bool g_mpuVigilando = false;    // el MPU quedó configurado para vigilar (sobrevive al sueño)
+bool g_alarmaArmada = false;
+uint32_t g_alarmaUltima = 0, g_sirenaHasta = 0, g_movidaDesde = 0;
+const uint8_t MOT_UMBRAL[5] = {40, 25, 15, 10, 6};   // ×2 mg · sensibilidad 1 (poca) a 5 (mucha)
+
+void alarmaCargar() {
+  Preferences s;
+  s.begin("alarma", true);
+  bool ok = s.getBytesLength("a") == sizeof(Alarma) && s.getBytes("a", &g_alarma, sizeof(Alarma)) == sizeof(Alarma) &&
+            g_alarma.magic == MAGIC_ALARMA;
+  s.end();
+  if (!ok) { g_alarma.magic = MAGIC_ALARMA; g_alarma.activa = true; g_alarma.sens = 3; g_alarma.sirena = 0; }
+  g_alarma.sens = constrain(g_alarma.sens, 1, 5);
+  if (g_alarma.sirena != 2 && g_alarma.sirena != 3 && g_alarma.sirena != 4) g_alarma.sirena = 0;
+}
+
+void alarmaGuardar() {
+  Preferences s;
+  s.begin("alarma", false);
+  s.putBytes("a", &g_alarma, sizeof g_alarma);
+  s.end();
+}
+
+uint8_t alarmaSirenaEn() { return g_alarma.sirena; }
+
+/** Sirena intermitente (medio segundo sí, medio no) mientras dura. */
+bool alarmaSirenaAhora() {
+  return g_alarma.sirena && g_sirenaHasta && (int32_t)(g_sirenaHasta - millis()) > 0 && (millis() / 500) % 2 == 0;
+}
+
+/** Sirve vigilar si hay a quién avisar: Telegram o una sirena. */
+bool alarmaUtil() { return PIN_MPU_INT >= 0 && g_alarma.activa && (tgListo() || g_alarma.sirena != 0); }
+
+/** Detección de movimiento del MPU (interrupción en su pin INT) prendida o apagada. */
+void imuMovimiento(bool on) {
+  imuEscribir(0x1F, MOT_UMBRAL[g_alarma.sens - 1]);   // umbral
+  imuEscribir(0x20, 40);                              // 40 ms seguidos
+  imuEscribir(0x1C, on ? 0x09 : 0x08);                // ±4 g; con alarma, pasa altas de 5 Hz para el detector
+  imuEscribir(0x38, on ? 0x40 : 0x00);                // MOT_EN
+  imuLeer(0x3A);                                      // limpia la interrupción pendiente
+}
+
+bool tgEnviar(const String& texto);
+bool casaWifiConectar(uint32_t esperaMs);
+
+void alarmaDisparar(bool dormida) {
+  uint32_t ms = millis();
+  if (!dormida && g_alarmaUltima && ms - g_alarmaUltima < 300000) return;   // una cada 5 min
+  g_alarmaUltima = ms;
+  registrarEvento(EVT_MOVIDA, 1);
+  aviso("MOTO MOVIDA");
+  bleEvento("{\"k\":\"m\"}");              // el teléfono (si está conectado) manda fotos y audio
+  if (g_alarma.sirena) g_sirenaHasta = ms + 6000;
+#if USAR_WIFI
+  if (tgListo() && casaWifiConectar(dormida ? 10000 : 3000))
+    tgEnviar(String("🚨 Movieron la moto") + (dormida ? " (estaba dormida)" : "") + ". Escribe /ubicacion o /bloquear.");
+#endif
+}
+
+// Cada tick, despierta: se arma estacionada y se desarma al girar la llave
+void alarmaTick() {
+  if (!g_imuOk || !alarmaUtil() || g_modoDemo) {
+    if (g_alarmaArmada) { imuMovimiento(false); g_alarmaArmada = false; }
+    return;
+  }
+  uint32_t ms = millis();
+  bool estacionada = !datos.ignicion && !g_motorEnc && ms - g_ultIgnOn > 120000;
+  if (estacionada != g_alarmaArmada) { imuMovimiento(estacionada); g_alarmaArmada = estacionada; g_movidaDesde = 0; }
+  if (!g_alarmaArmada) return;
+  if (digitalRead(PIN_MPU_INT) == HIGH) {
+    imuLeer(0x3A);
+    if (g_movidaDesde == 0) g_movidaDesde = ms;       // 20 s para ver si eres tú (giras la llave)
+  }
+  if (g_movidaDesde && ms - g_movidaDesde > 20000) { g_movidaDesde = 0; alarmaDisparar(false); }
+}
+
+/** Antes de dormir: el MPU queda vigilando solo y su pin INT puede despertar a la tarjeta. */
+bool alarmaAlDormir() {
+  if (!alarmaUtil() || g_alarmaPausa) return false;
+  if (g_imuOk) {                                       // despierta normal: se configura
+    imuMovimiento(true);
+    imuEscribir(0x6C, 0x47);                           // PWR_MGMT_2: 5 lecturas por segundo, giroscopio dormido
+    imuEscribir(0x6B, 0x28);                           // PWR_MGMT_1: modo ciclo, sin termómetro
+    imuLeer(0x3A);
+    g_mpuVigilando = true;
+  } else if (g_mpuVigilando) {
+    imuLeer(0x3A);                                     // despertó por el reloj: el MPU sigue configurado
+  }
+  if (!g_mpuVigilando) return false;
+  esp_sleep_enable_ext0_wakeup((gpio_num_t)PIN_MPU_INT, 1);
+  return true;
+}
+
+// Despertó porque la movieron: ¿eres tú? (giras la llave en 20 s) Si no, alarma y a dormir otra vez
+void despertarPorMovimiento() {
+  uint32_t t0 = millis();
+  while (millis() - t0 < 20000) {
+    if (leerIgnicion()) { g_mpuVigilando = false; return; }   // eres tú: arranque normal (imuBegin lo reinicia)
+    delay(100);
+  }
+  for (uint8_t i = 0; i < 20; i++) { adcActualizar(); delay(20); }
+  datos.vMoto = voltajeMoto();
+  datos.vLipo = voltajeLipo();
+  alarmaDisparar(true);
+  while (g_alarma.sirena && (int32_t)(g_sirenaHasta - millis()) > 0) { salidasAplicar(); delay(50); }
+  g_sirenaHasta = 0;
+  salidasAplicar();
+  g_alarmaPausa = true;                                // el siguiente sueño (5 min) no vigila: no suena en bucle
+  irADormir(true);
+}
+
+//  alarma | alarma on|off | alarma sens 1-5 | alarma sirena 0|2|3|s | alarma prueba
+void alarmaJson(Print& out) {
+  out.printf("{\"alm\":%d,\"as\":%u,\"ar\":%u,\"aa\":%d,\"ok\":%d}\n", g_alarma.activa ? 1 : 0, g_alarma.sens,
+             g_alarma.sirena, g_alarmaArmada ? 1 : 0, (PIN_MPU_INT >= 0 && g_imuOk) ? 1 : 0);
+}
+
+void alarmaComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "on" || c1 == "off") g_alarma.activa = c1 == "on";
+  else if (c1 == "sens") g_alarma.sens = constrain((int)c2.toInt(), 1, 5);
+  else if (c1 == "sirena") g_alarma.sirena = c2 == "2" ? 2 : c2 == "3" ? 3 : (c2 == "s" || c2 == "salida") ? 4 : 0;
+  else if (c1 == "prueba") { g_alarmaUltima = 0; alarmaDisparar(false); }
+  if (c1 != "" && c1 != "prueba") {
+    alarmaGuardar();
+    if (g_alarmaArmada) imuMovimiento(true);           // nueva sensibilidad
+  }
+  alarmaJson(out);
+}
+
+// ================================================================
+// 21e) IA DE VIBRACIONES: aprende cómo vibra TU moto sana y avisa cuando algo cambia
+// ================================================================
+// Sin internet ni modelo de fábrica: la tarjeta aprende sola mientras ruedas. Cada 1.28 s toma 128 lecturas del
+// acelerómetro (100 por segundo, por la FIFO del MPU) y saca 4 "huellas":
+//   - vibración total (RMS)
+//   - energía a la frecuencia de las explosiones del motor (rpm/120 Hz)
+//   - energía a la vuelta de la rueda y al doble (cadena, rueda desbalanceada, balero, rin)
+// Por cada rango de 500 rpm guarda el promedio y la variación normal de cada huella. Cuando un rango ya conoce bien
+// tu moto (2 min ahí), mide qué tan lejos está cada lectura de lo normal (desviaciones). Más de 3.5 seguido ~10 s =
+// "VIBRACION RARA": cadena floja o seca, rueda o balero, tornillo o soporte suelto, motor raro.
+// Con "vibra captura on" guarda todo en vibra.csv: con esos datos se puede entrenar después una red neuronal más fina.
+const uint8_t VB_N = 128, VB_BINS = 20, VB_F = 4;
+const float VB_HZ = 100.0f;
+struct ModeloVibra { uint32_t magic; uint16_t n[VB_BINS]; float media[VB_BINS][VB_F]; float var[VB_BINS][VB_F]; };
+const uint32_t MAGIC_VIBRA = 0xF150B1B1;
+ModeloVibra g_vb;
+bool g_vbActiva = false, g_vbCaptura = false, g_vbSucio = false, g_vbFifo = false;
+float g_vbBuf[3][VB_N];
+uint8_t g_vbI = 0;
+float g_vbMedia[3] = {0, 0, 1};
+float g_vbScore = 0;
+float g_vbRuedaZ = 0;
+uint8_t g_vbSeguidas = 0, g_vbBien = 0;
+uint32_t g_vbGuardado = 0, g_vbVentanas = 0;
+
+void vibraCargar() {
+  Preferences s;
+  s.begin("vibra", true);
+  g_vbActiva = s.getBool("on", false);
+  g_vbCaptura = s.getBool("cap", false);
+  bool ok = s.getBytesLength("m") == sizeof(ModeloVibra) && s.getBytes("m", &g_vb, sizeof g_vb) == sizeof g_vb &&
+            g_vb.magic == MAGIC_VIBRA;
+  s.end();
+  if (!ok) { memset(&g_vb, 0, sizeof g_vb); g_vb.magic = MAGIC_VIBRA; }
+}
+
+void vibraGuardar(bool modelo) {
+  Preferences s;
+  s.begin("vibra", false);
+  s.putBool("on", g_vbActiva);
+  s.putBool("cap", g_vbCaptura);
+  if (modelo) { s.putBytes("m", &g_vb, sizeof g_vb); g_vbSucio = false; g_vbGuardado = millis(); }
+  s.end();
+}
+
+void vibraFifo(bool on) {
+  if (!g_imuOk || on == g_vbFifo) return;
+  imuEscribir(0x6A, 0x04);                      // reinicia la FIFO
+  imuEscribir(0x23, on ? 0x08 : 0x00);          // solo el acelerómetro
+  imuEscribir(0x6A, on ? 0x40 : 0x00);          // FIFO prendida / apagada
+  g_vbFifo = on;
+  g_vbI = 0;
+}
+
+/** Energía de la frecuencia f (Hz) en x[0..n) (algoritmo de Goertzel), normalizada. */
+float goertzel(const float* x, uint8_t n, float f) {
+  float w = 2.0f * PI * f / VB_HZ, c = 2.0f * cosf(w), s1 = 0, s2 = 0;
+  for (uint8_t i = 0; i < n; i++) { float s0 = x[i] + c * s1 - s2; s2 = s1; s1 = s0; }
+  return (s1 * s1 + s2 * s2 - c * s1 * s2) / ((float)n * n);
+}
+
+float vibraEnergia(float f) {
+  if (f < 1.5f || f > 45.0f) return NAN;        // fuera de lo que se puede medir a 100 por segundo con el filtro de 44 Hz
+  return goertzel(g_vbBuf[0], VB_N, f) + goertzel(g_vbBuf[1], VB_N, f) + goertzel(g_vbBuf[2], VB_N, f);
+}
+
+void vibraVentana() {
+  int rpm = datos.rpm;
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (!g_motorEnc || rpm < 1500 || rpm >= VB_BINS * 500 || v < 5) return;   // solo rodando
+  float suma = 0;
+  for (uint8_t i = 0; i < VB_N; i++) suma += g_vbBuf[0][i] * g_vbBuf[0][i] + g_vbBuf[1][i] * g_vbBuf[1][i] + g_vbBuf[2][i] * g_vbBuf[2][i];
+  float rueda = v / 3.6f / (CIRCUNF_RUEDA_MM / 1000.0f);   // vueltas de la rueda por segundo
+  float f[VB_F] = { sqrtf(suma / VB_N), vibraEnergia(rpm / 120.0f), vibraEnergia(rueda), vibraEnergia(rueda * 2) };
+  uint8_t b = rpm / 500;
+  uint16_t& n = g_vb.n[b];
+  float z = 0, zr = 0; uint8_t k = 0, kr = 0;
+  for (uint8_t j = 0; j < VB_F; j++) {
+    if (isnan(f[j])) continue;
+    float y = log10f(f[j] + 1e-7f);
+    f[j] = y;
+    if (n >= 120) {
+      float zj = fabsf(y - g_vb.media[b][j]) / sqrtf(g_vb.var[b][j] + 1e-4f);
+      z += zj; k++;
+      if (j >= 2) { zr += zj; kr++; }              // huellas de la rueda (cadena, rin, balero)
+    }
+  }
+  if (kr) g_vbRuedaZ += 0.05f * (zr / kr - g_vbRuedaZ);   // promedio lento: lo usa el estado de la cadena
+  g_vbScore = k ? z / k : 0;
+  g_vbVentanas++;
+  // Aprende (lento: hasta 600 ventanas por rango ≈ 13 min, así se adapta a la moto con el tiempo), pero no de lo raro
+  if (g_vbScore < 3.0f) {
+    if (n < 600) n++;
+    for (uint8_t j = 0; j < VB_F; j++) {
+      if (isnan(f[j])) continue;
+      float d = f[j] - g_vb.media[b][j];
+      g_vb.media[b][j] += d / n;
+      g_vb.var[b][j] += (d * (f[j] - g_vb.media[b][j]) - g_vb.var[b][j]) / n;
+    }
+    g_vbSucio = true;
+  }
+  // ~10 s seguidos raros = alerta; se quita después de ~40 s normales
+  if (k && g_vbScore > 3.5f) { g_vbBien = 0; if (g_vbSeguidas < 255) g_vbSeguidas++; }
+  else { g_vbSeguidas = 0; if (g_vbBien < 255) g_vbBien++; }
+  if (!datos.vibraAlerta && g_vbSeguidas >= 8) { datos.vibraAlerta = true; registrarEvento(EVT_VIBRA, g_vbScore); }
+  if (datos.vibraAlerta && g_vbBien >= 30) datos.vibraAlerta = false;
+  if (g_vbCaptura) {
+    char fe[24], l[128];
+    fechaTexto(fe, sizeof fe, ahora());
+    snprintf(l, sizeof l, "%s,%d,%.1f,%d,%.4f,%.3f,%.3f,%.3f,%.2f", fe, rpm, v, datos.marcha,
+             f[0], f[1], f[2], f[3], g_vbScore);
+    sdAgregar("/vibra.csv", "fecha,rpm,vel,marcha,log_rms,log_motor,log_rueda,log_rueda2,score", l);
+  }
+}
+
+// En cada vuelta de loop: saca de la FIFO lo que haya (máx. 20 lecturas por llamada, ~11 ms del bus I2C)
+void vibraActualizar() {
+  bool usar = g_vbActiva && g_imuOk && !g_modoDemo && g_motorEnc;
+  vibraFifo(usar);
+  if (!usar) {
+    if (g_vbSucio && millis() - g_vbGuardado > 300000) vibraGuardar(true);
+    return;
+  }
+  static uint32_t ultima = 0;                   // cada 50 ms (se juntan ~5 lecturas): no ocupar el bus I2C de más
+  if (millis() - ultima < 50) return;
+  ultima = millis();
+  uint16_t cuenta = ((uint16_t)imuLeer(0x72) << 8) | imuLeer(0x73);
+  if (cuenta >= 1000) { vibraFifo(false); vibraFifo(true); return; }    // se llenó: se perdió el orden, empieza de nuevo
+  uint8_t muestras = min((uint16_t)20, (uint16_t)(cuenta / 6));
+  if (!muestras) return;
+  Wire.beginTransmission(MPU_DIR);
+  Wire.write(0x74);
+  if (Wire.endTransmission(false) != 0) return;
+  if (Wire.requestFrom((uint8_t)MPU_DIR, (uint8_t)(muestras * 6)) != muestras * 6) return;
+  for (uint8_t m = 0; m < muestras; m++) {
+    for (uint8_t e = 0; e < 3; e++) {
+      int16_t raw = (Wire.read() << 8) | Wire.read();
+      float g = raw / 8192.0f;
+      g_vbMedia[e] += 0.02f * (g - g_vbMedia[e]);       // quita la gravedad y lo lento (pasa altas ~0.3 Hz)
+      g_vbBuf[e][g_vbI] = g - g_vbMedia[e];
+    }
+    if (++g_vbI >= VB_N) { g_vbI = 0; vibraVentana(); }
+  }
+  if (g_vbSucio && millis() - g_vbGuardado > 300000) vibraGuardar(true);
+}
+
+uint8_t vibraMaduros() { uint8_t m = 0; for (uint8_t b = 0; b < VB_BINS; b++) if (g_vb.n[b] >= 120) m++; return m; }
+
+//  vibra | vibra on|off | vibra captura on|off | vibra olvidar
+void vibraJson(Print& out) {
+  out.printf("{\"vb\":%d,\"vc\":%d,\"vm\":%u,\"vn\":%lu,\"vs\":%.2f,\"va\":%d}\n", g_vbActiva ? 1 : 0, g_vbCaptura ? 1 : 0,
+             vibraMaduros(), (unsigned long)g_vbVentanas, g_vbScore, datos.vibraAlerta ? 1 : 0);
+}
+
+void vibraComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "on" || c1 == "off") { g_vbActiva = c1 == "on"; vibraGuardar(false); }
+  else if (c1 == "captura") { g_vbCaptura = c2 == "on"; vibraGuardar(false); }
+  else if (c1 == "olvidar") { memset(&g_vb, 0, sizeof g_vb); g_vb.magic = MAGIC_VIBRA; datos.vibraAlerta = false; vibraGuardar(true); }
+  vibraJson(out);
+}
+
+// ================================================================
+// 21f) MÁS IA Y AYUDAS: baches, estado de los componentes, llave de proximidad y resumen semanal
+// ================================================================
+// --- IA de baches: un golpe vertical (en la dirección de la gravedad con la moto derecha) mucho más fuerte que la
+// vibración normal de ese momento. Se compara contra la vibración que viene trayendo (adaptativo): en empedrado o a
+// muchas RPM sube el umbral solo. Rodando a más de 15 km/h y con GPS. Va a baches.csv y a la app (su mapa de baches).
+const float BACHE_MIN_G = 0.45f;       // nunca menos que esto
+const float BACHE_VECES = 4.0f;        // ... ni menos de 4 veces la vibración normal
+float g_vertRms = 0.1f;
+uint32_t g_bacheUlt = 0;
+uint16_t g_bachesHoy = 0;
+
+void bachesRevisar() {
+  float nr = sqrtf(P.imuRef[0] * P.imuRef[0] + P.imuRef[1] * P.imuRef[1] + P.imuRef[2] * P.imuRef[2]);
+  if (nr < 0.5f) return;
+  float vert = (g_acc[0] * P.imuRef[0] + g_acc[1] * P.imuRef[1] + g_acc[2] * P.imuRef[2]) / nr - nr;   // g extra hacia arriba/abajo
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  float f = fabsf(vert);
+  bool golpe = f > max(BACHE_MIN_G, BACHE_VECES * g_vertRms);
+  g_vertRms = sqrtf(g_vertRms * g_vertRms * 0.98f + vert * vert * 0.02f);   // vibración normal (~1 s)
+  if (!golpe || g_modoDemo || v < 15 || !datos.gpsFix || millis() - g_bacheUlt < 1500) return;
+  g_bacheUlt = millis();
+  g_bachesHoy++;
+  float fuerza = f * 9.81f;            // en m/s², como los mide el teléfono
+  char l[96];
+  char fe[24];
+  fechaTexto(fe, sizeof fe, ahora());
+  snprintf(l, sizeof l, "%s,%.6f,%.6f,%.2f,%.0f", fe, datos.lat, datos.lon, fuerza, v);
+  sdAgregar("/baches.csv", "fecha,lat,lon,fuerza_ms2,vel", l);
+  snprintf(l, sizeof l, "{\"k\":\"b\",\"la\":%.6f,\"lo\":%.6f,\"f\":%.1f}", datos.lat, datos.lon, fuerza);
+  bleEvento(l);
+}
+
+// --- Estado de los componentes: 0-100 y qué hacer, con lo que la tarjeta ya mide.
+extern float g_vbRuedaZ;
+
+float mantFraccion(uint8_t i) { return P.mant[i].intKm ? constrain(mantKmDesde(i) / P.mant[i].intKm, 0.0f, 1.5f) : 0; }
+
+uint8_t saludCalcular(ItemSalud* it) {
+  // Batería: voltaje en reposo, tendencia, último arranque y carga del alternador
+  int p = 100; String c = "Bien.";
+  float ur = reposoUltimo();
+  if (ur > 5 && ur < 12.2f) { p -= 40; c = "En reposo está baja (" + String(ur, 2) + " V): cárgala o revísala."; }
+  else if (ur > 5 && ur < 12.4f) { p -= 20; c = "En reposo está a media carga (" + String(ur, 2) + " V)."; }
+  int dias = diasHastaBateriaDebil();
+  if (dias >= 0 && dias < 30) { p -= 20; c = "Va bajando: en ~" + String(dias) + " días quedaría débil."; }
+  float dip = NAN;
+  for (uint8_t i = 0; i < NUM_ARRANQUES_DIAG; i++) { float x = A.arranques[(A.idxArr + NUM_ARRANQUES_DIAG - 1 - i) % NUM_ARRANQUES_DIAG]; if (!isnan(x)) { dip = x; break; } }
+  if (!isnan(dip) && dip < 9.6f) { p -= 35; c = "Al dar marcha baja a " + String(dip, 1) + " V: la batería ya está cansada."; }
+  else if (!isnan(dip) && dip < 10.2f) { p -= 15; c = "Al dar marcha baja a " + String(dip, 1) + " V: vigílala."; }
+  if (g_estadoCarga == 2) { p -= 40; c = "El alternador no está cargando: revisa el regulador."; }
+  if (g_estadoCarga == 3) { p -= 40; c = "Sobrecarga: el regulador está fallando."; }
+  it[0] = {"Batería", constrain(p, 0, 100), c};
+  // Cadena: km desde la última lubricada + vibración a la vuelta de la rueda (IA de vibraciones)
+  float fr = mantFraccion(0);
+  p = 100 - (int)(70 * min(fr, 1.0f)); c = fr >= 1 ? "Ya toca lubricarla y ajustarla." : fr > 0.7f ? "Pronto toca lubricarla." : "Bien.";
+  if (g_vbRuedaZ > 2.5f) { p -= 25; c = "Vibra raro a la vuelta de la rueda: revisa la tensión de la cadena y el rin."; }
+  it[1] = {"Cadena", constrain(p, 0, 100), c};
+  // Encendido: chispas que faltan, irregularidad, ralentí y bujía
+  p = 100; c = "Bien.";
+  noInterrupts(); uint32_t pul = g_pulsos, fal = g_chispaFaltas, irs = g_irrSuma, irn = g_irrN; interrupts();
+  float pf = pul > 2000 ? 100.0f * fal / pul : 0;
+  if (pf > 2) { p -= 50; c = "Faltan chispas (" + String(pf, 1) + " %): revisa bujía, capuchón y cable."; }
+  else if (pf > 0.5f) { p -= 25; c = "Se brinca alguna chispa: revisa la bujía."; }
+  if (irn > 500 && irs / irn > 120) { p -= 20; if (c == "Bien.") c = "El motor va irregular."; }
+  if (ralentiFuera()) { p -= 15; if (c == "Bien.") c = "Ralentí fuera de rango (" + String((int)g_ralenti) + " rpm)."; }
+  if (mantFraccion(3) >= 1) { p -= 20; if (c == "Bien.") c = "Ya toca cambiar la bujía."; }
+  it[2] = {"Encendido", constrain(p, 0, 100), c};
+  // Frenos: km desde el último servicio
+  fr = mantFraccion(4);
+  it[3] = {"Frenos", constrain(100 - (int)(70 * min(fr, 1.0f)), 0, 100), fr >= 1 ? String("Ya toca revisar balatas.") : fr > 0.7f ? String("Pronto toca revisarlas.") : String("Bien.")};
+  // Motor: aceite, temperatura y ralentí
+  fr = mantFraccion(1);
+  p = 100 - (int)(50 * min(fr, 1.0f)); c = fr >= 1 ? "Ya toca cambio de aceite." : fr > 0.7f ? "Pronto toca cambio de aceite." : "Bien.";
+  if (!isnan(datos.tempC) && datos.tempC > TEMP_MAX_C) { p -= 40; c = "Se está calentando de más (" + String((int)datos.tempC) + " °C)."; }
+  if (mantFraccion(2) >= 1) { p -= 10; if (c == "Bien.") c = "Ya toca cambiar el filtro."; }
+  it[4] = {"Motor", constrain(p, 0, 100), c};
+  return 5;
+}
+
+//  salud      estado de los componentes en JSON (la app y Telegram)
+void saludJson(Print& out) {
+  ItemSalud it[5];
+  uint8_t n = saludCalcular(it);
+  out.print(F("{\"salud\":["));
+  for (uint8_t i = 0; i < n; i++) {
+    char cons[80];
+    textoSeguro(cons, sizeof cons, it[i].consejo.c_str());
+    out.printf("%s{\"c\":\"%s\",\"p\":%d,\"t\":\"%s\"}", i ? "," : "", it[i].nombre, it[i].puntos, cons);
+  }
+  out.println(F("]}"));
+}
+
+// --- Llave de proximidad (APAGADA de fábrica): al girar la llave con la moto parada, el bloqueo (relevador 1) se
+// queda puesto hasta que tu teléfono vinculado (el POCO o el iPhone) se conecte cifrado, o escribas tu código con
+// los 3 botones (de fábrica: arriba, arriba, abajo, OK). Nunca bloquea rodando; ya liberada no vuelve hasta apagar.
+struct Llave { uint32_t magic; bool activa; uint8_t codigo[4]; };
+const uint32_t MAGIC_LLAVE = 0xF150C1A1;
+Llave g_llave;
+bool g_llaveCerrada = false;
+uint8_t g_llaveIdx = 0;
+
+void llaveCargar() {
+  Preferences s;
+  s.begin("llave", true);
+  bool ok = s.getBytesLength("l") == sizeof(Llave) && s.getBytes("l", &g_llave, sizeof(Llave)) == sizeof(Llave) && g_llave.magic == MAGIC_LLAVE;
+  s.end();
+  if (!ok) { g_llave = {MAGIC_LLAVE, false, {EV_ARRIBA, EV_ARRIBA, EV_ABAJO, EV_OK}}; }
+}
+
+void llaveGuardar() { Preferences s; s.begin("llave", false); s.putBytes("l", &g_llave, sizeof g_llave); s.end(); }
+
+bool telefonoCerca();   // en la parte del Bluetooth (29b): un teléfono vinculado conectado y cifrado
+
+void llaveTick() {
+  static bool ignAntes = false;
+  bool ign = datos.ignicion;
+  if (!g_llave.activa || g_modoDemo) { g_llaveCerrada = false; ignAntes = ign; return; }
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (ign && !ignAntes && v < VEL_MAX_CORTE && !telefonoCerca()) { g_llaveCerrada = true; g_llaveIdx = 0; }
+  if (!ign) g_llaveCerrada = false;
+  if (g_llaveCerrada && telefonoCerca()) { g_llaveCerrada = false; aviso("Telefono OK"); }
+  ignAntes = ign;
+}
+
+bool llaveBoton(uint8_t ev) {
+  if (!g_llaveCerrada) return false;
+  if (ev == EV_OK_LARGO) return true;
+  if (ev == g_llave.codigo[g_llaveIdx]) {
+    if (++g_llaveIdx >= 4) { g_llaveCerrada = false; g_llaveIdx = 0; aviso("Codigo OK"); releAplicar(); }
+  } else g_llaveIdx = (ev == g_llave.codigo[0]) ? 1 : 0;
+  return true;
+}
+
+//  llave | llave on|off | llave codigo <4 de a/b/o>  (a = arriba, b = abajo, o = OK)
+void llaveComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "on" || c1 == "off") { g_llave.activa = c1 == "on"; if (!g_llave.activa) g_llaveCerrada = false; llaveGuardar(); }
+  else if (c1 == "codigo") {
+    if (c2.length() != 4) { out.println(F("Usa: llave codigo aabo (a arriba, b abajo, o OK)")); return; }
+    for (uint8_t i = 0; i < 4; i++) {
+      char x = c2[i];
+      if (x != 'a' && x != 'b' && x != 'o') { out.println(F("Solo a, b u o.")); return; }
+      g_llave.codigo[i] = x == 'a' ? EV_ARRIBA : x == 'b' ? EV_ABAJO : EV_OK;
+    }
+    llaveGuardar();
+  }
+  out.printf("{\"ll\":%d,\"lc\":%d,\"tel\":%d}\n", g_llave.activa ? 1 : 0, g_llaveCerrada ? 1 : 0, telefonoCerca() ? 1 : 0);
+}
+
+// --- Resumen semanal (Telegram, el lunes): km, viajes, gasolina, velocidad máxima y baches
+struct Semana { uint32_t magic, id; float km, litros, vmax; uint16_t viajes, baches; };
+const uint32_t MAGIC_SEMANA = 0xF150D1A1;
+Semana g_semana;
+
+uint32_t semanaId() { return g_rtcOk ? (ahoraEpoch() - 345600UL) / 604800UL : 0; }   // cambia los lunes a las 0:00
+
+void semanaCargar() {
+  Preferences s; s.begin("semana", true);
+  bool ok = s.getBytesLength("s") == sizeof(Semana) && s.getBytes("s", &g_semana, sizeof g_semana) == sizeof g_semana && g_semana.magic == MAGIC_SEMANA;
+  s.end();
+  if (!ok) { memset(&g_semana, 0, sizeof g_semana); g_semana.magic = MAGIC_SEMANA; g_semana.id = semanaId(); }
+}
+
+void semanaGuardar() { Preferences s; s.begin("semana", false); s.putBytes("s", &g_semana, sizeof g_semana); s.end(); }
+
+void semanaSumarViaje(float km, float litros, float vmax) {
+  if (g_modoDemo) return;
+  g_semana.km += km; g_semana.litros += litros; g_semana.viajes++;
+  g_semana.vmax = max(g_semana.vmax, vmax);
+  g_semana.baches += g_bachesHoy; g_bachesHoy = 0;
+  semanaGuardar();
+}
+
+/** Texto del resumen de la semana que terminó ("" si no hubo viajes). */
+String semanaTexto() {
+  if (g_semana.viajes == 0) return "";
+  String t = "📊 Tu semana en la FT150TS\n🛣️ " + String(g_semana.km, 1) + " km en " + String(g_semana.viajes) + " viajes\n";
+  if (g_semana.litros > 0.1f) t += "⛽ ~" + String(g_semana.litros, 1) + " L (" + String(g_semana.km / g_semana.litros, 1) + " km/L)\n";
+  t += "🏁 Máxima " + String((int)g_semana.vmax) + " km/h\n";
+  if (g_semana.baches) t += "🕳️ " + String(g_semana.baches) + " baches\n";
+  t += "🔧 Escribe /salud para ver cómo está la moto.";
+  return t;
+}
+
+// ================================================================
 // 22) ALERTAS (fila 4 de la pantalla principal)
 // ================================================================
 // Devuelve true si hay una alerta. El texto va sin ícono (para mandarlo
@@ -1857,8 +2529,11 @@ bool construirAlerta(char* txt, size_t n, Icono& icono) {
   float v = isnan(datos.vel) ? 0 : datos.vel;
   icono = ICO_ALERTA;
 
+  if (g_llaveCerrada) { snprintf(txt, n, "ACERCA TU TELEFONO"); return true; }
   if (P.corteActivo || g_corteCaida) { snprintf(txt, n, "MOTOR BLOQUEADO"); return true; }
   if (g_caida) { snprintf(txt, n, "CAIDA DETECTADA"); return true; }
+  if (datos.dirOlvidada) { snprintf(txt, n, "DIRECCIONAL PRENDIDA"); return true; }
+  if (datos.vibraAlerta) { snprintf(txt, n, "VIBRACION RARA"); return true; }
   if (g_iphone.llamada) {
     char de[24];
     aAscii(g_iphone.llamadaDe, de, sizeof de);
@@ -2209,7 +2884,8 @@ void accionAjuste(uint8_t i) {
 #endif
       break;
     case 4: corteCambiar(!P.corteActivo, tp); aviso(P.corteActivo ? "Motor bloqueado" : "Motor libre"); break;
-    case 5: g_modoDemo = !g_modoDemo; if (!g_modoDemo) { nvsCargar(); memset(&g_viaje, 0, sizeof(g_viaje)); }
+    case 5: if (!g_modoDemo && g_nvsSucio) nvsGuardar();   // antes de entrar al demo: no perder los km sin guardar
+      g_modoDemo = !g_modoDemo; if (!g_modoDemo) { nvsCargar(); memset(&g_viaje, 0, sizeof(g_viaje)); }
       aviso(g_modoDemo ? "Demo activado" : "Demo apagado"); break;
   }
   nvsGuardar();
@@ -2218,6 +2894,8 @@ void accionAjuste(uint8_t i) {
 void manejarBotones() {
   Evento e = botonesLeer();
   if (e == EV_NINGUNO) return;
+  extern bool llaveBoton(uint8_t ev);
+  if (llaveBoton((uint8_t)e)) return;      // esperando tu teléfono: los botones escriben el código
   g_ultActividad = millis();
   float v = isnan(datos.vel) ? 0 : datos.vel;
   bool moviendo = v > VEL_BLOQUEO_MENU && !g_modoDemo;
@@ -2301,6 +2979,9 @@ void demoGenerar() {
   datos.ignicion = true;
   datos.incl = 3 + 2 * sin(t);
   datos.aFwd = 0.1f * cos(t / 6.0f);
+  datos.freno = cos(t / 6.0f) < -0.7f;                 // frena cuando la velocidad va bajando
+  datos.direccional = fmod(t, 40.0f) < 5.0f;           // una vuelta cada 40 s
+  datos.dirOlvidada = false;
   if (millis() < g_simCaidaHasta) { datos.incl = 80; datos.vel = 0; }
   if (millis() < g_simFrenadaHasta) { datos.aFwd = -0.7f; datos.vel = max(datos.vel, 30.0f); }
   datos.luz = porcentajeLuz();
@@ -2402,6 +3083,9 @@ bool estaVinculado(const uint8_t* bda) {
 }
 uint32_t g_ultTelRapida = 0, g_ultTelLenta = 0;
 uint8_t g_turnoLenta = 0;
+/** La app pidió el mensaje rápido en binario ("tel bin", app v3.11+): 18 bytes 10 veces por segundo en vez de un
+ *  JSON de ~200 bytes 4 veces por segundo. Una app vieja no lo pide y sigue recibiendo JSON. */
+volatile bool g_telBin = false;
 
 ConexionBle g_conex[MAX_CONEX];
 
@@ -2410,7 +3094,35 @@ void recalcularConexiones() {
   bool app = false;
   for (uint8_t i = 0; i < MAX_CONEX; i++) if (g_conex[i].usada && !g_conex[i].esIphone) app = true;
   g_bleConectado = app;
+  if (!app) g_telBin = false;      // la próxima app que se conecte dice qué formato quiere
 }
+
+/** ¿La conexión [connId] tiene el enlace cifrado (teléfono vinculado)? */
+bool conexionCifrada(uint16_t connId) {
+  for (uint8_t i = 0; i < MAX_CONEX; i++) if (g_conex[i].usada && g_conex[i].id == connId) return g_conex[i].cifrada;
+  return false;
+}
+
+// ---------- Actualizar el firmware desde la app (OTA) ----------
+// La app manda "ota inicio <bytes> <md5>" (solo enlace cifrado y la moto parada), el .bin en pedazos por BLE_OTA
+// ([desde: 4 bytes][datos], escritura confirmada: el teléfono espera a que se grabe cada pedazo) y "ota fin".
+// Update revisa el MD5 y que sea un firmware de ESP32 válido: si algo falla, sigue el firmware que ya corre.
+// Necesita el esquema de particiones con dos copias: "16M Flash (3MB APP/9.9MB FATFS)".
+class BleOtaCb : public BLECharacteristicCallbacks {
+  void onWrite(BLECharacteristic* c, esp_ble_gatts_cb_param_t* p) override {
+    if (!g_otaActivo || g_otaError) return;
+    if (!conexionCifrada(p->write.conn_id)) { g_otaError = true; return; }
+    const uint8_t* d = c->getData();
+    size_t n = c->getLength();
+    if (!d || n < 5) return;
+    uint32_t desde = d[0] | (d[1] << 8) | ((uint32_t)d[2] << 16) | ((uint32_t)d[3] << 24);
+    if (desde != g_otaRecibido) { g_otaError = true; return; }   // se perdió o repitió un pedazo
+    size_t k = n - 4;
+    if (Update.write((uint8_t*)d + 4, k) != k) { g_otaError = true; return; }
+    g_otaRecibido += k;
+    g_otaUltimo = millis();
+  }
+};
 
 void marcarApp(uint16_t connId) {
   for (uint8_t i = 0; i < MAX_CONEX; i++) if (g_conex[i].usada && g_conex[i].id == connId) g_conex[i].esApp = true;
@@ -2730,6 +3442,10 @@ void iosRevisar(uint8_t i) {
   BLERemoteService* ams = cli->getService(BLEUUID(AMS_SVC));
   if (!ancs && !ams) {                              // no es un iPhone
     cli->disconnect();
+    // Antes no se liberaba: cada teléfono o escáner que no era iPhone dejaba un cliente registrado en Bluedroid
+    // (hay pocos lugares) y después ya no se podía revisar al iPhone hasta reiniciar la tarjeta.
+    vTaskDelay(pdMS_TO_TICKS(300));                 // que termine la desconexión antes de borrarlo (igual que iosLimpiar)
+    delete cli;
     return;
   }
   g_conex[i].esIphone = true;
@@ -2863,6 +3579,11 @@ void bleBegin() {
   g_chResp = svc->createCharacteristic(BLE_RESP, BLECharacteristic::PROPERTY_READ | BLECharacteristic::PROPERTY_NOTIFY);
   g_chResp->addDescriptor(new BLE2902());
 
+  // Firmware nuevo (OTA): Bluetooth solo deja escribir aquí con el enlace cifrado (teléfono vinculado)
+  BLECharacteristic* chO = svc->createCharacteristic(BLE_OTA, BLECharacteristic::PROPERTY_WRITE);
+  chO->setAccessPermissions(ESP_GATT_PERM_WRITE_ENCRYPTED);
+  chO->setCallbacks(new BleOtaCb());
+
   svc->start();
 
   // Anuncio: el servicio de la app en el paquete principal; el nombre y la
@@ -2889,6 +3610,8 @@ void bleBegin() {
 
 #if !USAR_BLE
 bool iosMusica(uint8_t comando) { return false; }
+void bleEvento(const char* json) {}
+bool telefonoCerca() { return false; }
 bool iosLlamada(uint8_t accion) { return false; }
 void iosOlvidar() {}
 #endif
@@ -2942,6 +3665,16 @@ void mostrarAyuda(Print& out) {
   out.println(F(" av lc on 6000 confirmar | off    launch control (requiere corte de chispa)"));
   out.println(F(" av qs on 60 4500 confirmar | off quickshifter (corte + sensor)"));
   out.println(F(" av diag on|off          diagnostico de motor y bateria"));
+  out.println(F(" sd lista | sd leer <archivo> <desde>   registros de la SD (la app los baja)"));
+  out.println(F(" casa                    WiFi de casa y Telegram: estado"));
+  out.println(F(" casa ssid <red> | casa clave <clave> | casa tg <token> <chat>"));
+  out.println(F(" casa cada <min> | casa prueba | casa borrar"));
+  out.println(F(" ota                     estado de la actualizacion desde la app"));
+  out.println(F(" rele | rele 2|3|s on [seg] | off      relevadores 2 y 3 y la salida aislada"));
+  out.println(F(" alarma | alarma on|off | sens 1-5 | sirena 0|2|3|s | prueba"));
+  out.println(F(" vibra | vibra on|off | captura on|off | olvidar     IA de vibraciones"));
+  out.println(F(" salud                   estado de bateria, cadena, encendido, frenos y motor"));
+  out.println(F(" llave | llave on|off | llave codigo aabo    llave de proximidad (apagada de fabrica)"));
 }
 
 void mostrarEstado(Print& out) {
@@ -2979,10 +3712,15 @@ uint32_t g_reiniciarEn = 0;     // "reiniciar": se hace un momento después para
 void cfgJson(Print& out) {
   out.printf("{\"fw\":\"%s\",\"up\":%lu,\"hp\":%u,\"tc\":%.1f,\"pf\":%d,\"fv\":%d,\"ab\":%d,\"wf\":%d,"
              "\"kl\":%.1f,\"bf\":%.3f,\"gv\":%.0f,\"gl\":%.0f,\"dm\":%d,\"rtc\":%d,\"imu\":%d,\"sd\":%d,\"tp\":%d,"
-             "\"pm\":%.2f,\"sh\":[",
+             "\"pm\":%.2f,\"ota\":%d,\"casa\":%d,\"r2\":%d,\"r3\":%d,\"so\":%d,\"alm\":%d,\"as\":%u,\"ar\":%u,\"aok\":%d,\"ll\":%d,"
+             "\"vb\":%d,\"vc\":%d,\"vm\":%u,\"placa\":\"B\",\"sh\":[",
              FW_VERSION, (unsigned long)(millis() / 1000), (unsigned)(ESP.getFreeHeap() / 1024), temperatureRead(),
              P.perfil, P.fuenteVel, P.autoBrillo, P.wifiOn, P.kmPorLitro, P.batFactor, P.gasMvVacio, P.gasMvLleno,
-             g_modoDemo, g_rtcOk, g_imuOk, g_sdOk, g_tempOk, P.pistaMejor);
+             g_modoDemo, g_rtcOk, g_imuOk, g_sdOk, g_tempOk, P.pistaMejor,
+             // ota: hay una segunda partición para grabar el firmware nuevo (con "Huge APP" no la hay)
+             (USAR_BLE && esp_ota_get_next_update_partition(NULL) != NULL) ? 1 : 0, USAR_WIFI ? 1 : 0,
+             g_rele2, g_rele3, g_salida, g_alarma.activa ? 1 : 0, g_alarma.sens, g_alarma.sirena,
+             (PIN_MPU_INT >= 0 && g_imuOk) ? 1 : 0, g_llave.activa ? 1 : 0, g_vbActiva ? 1 : 0, g_vbCaptura ? 1 : 0, vibraMaduros());
   for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%.0f", i ? "," : "", g_shiftActual[i]);
   out.print(F("],\"rm\":["));
   for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%.1f", i ? "," : "", P.ratioMarcha[i]);
@@ -2994,12 +3732,403 @@ void cfgJson(Print& out) {
 bool comandoDelicado(const String& low) {
   String c0 = palabra(low, 0), c1 = palabra(low, 1);
   if (c0 == "corte" || c0 == "cal" || c0 == "odo" || c0 == "real" || c0 == "demo" || c0 == "reiniciar" ||
-      c0 == "wifi" || c0 == "vel" || c0 == "vincular") return true;
+      c0 == "wifi" || c0 == "vel" || c0 == "vincular" ||
+      c0 == "borrar" || c0 == "dormir") return true;   // borrar todo y apagar la tarjeta ("hora" no: la app la manda
+                                                       // al conectarse, a veces antes de que el enlace quede cifrado)
   if (c0 == "mant" && (c1 == "reset" || c1 == "set")) return true;
   if (c0 == "av" && c1 != "") return true;   // limitador, launch, quickshifter, diagnóstico
   if (c0 == "ios" && (c1 == "olvidar" || c1 == "contestar" || c1 == "colgar")) return true;
+  if (c0 == "ota" && c1 != "") return true;    // grabar firmware nuevo
+  if (c0 == "casa" && c1 != "") return true;   // WiFi de tu casa y Telegram (claves)
+  if ((c0 == "rele" || c0 == "alarma" || c0 == "vibra" || c0 == "llave") && c1 != "") return true;   // relevadores, alarma, IA, llave
   return false;
 }
+
+/** Lo que sigue de la palabra [n] en adelante, tal cual (con mayúsculas y espacios: nombres de red, claves). */
+String restoDesde(const String& s, int n) {
+  int idx = 0, i = 0;
+  while (i < (int)s.length()) {
+    while (i < (int)s.length() && s[i] == ' ') i++;
+    if (i >= (int)s.length()) break;
+    if (idx == n) return s.substring(i);
+    while (i < (int)s.length() && s[i] != ' ') i++;
+    idx++;
+  }
+  return String("");
+}
+
+// ================================================================
+// 28b) FIRMWARE NUEVO (OTA), REGISTROS DE LA SD Y "CASA" (WiFi de tu casa + Telegram)
+// ================================================================
+//  ota inicio <bytes> <md5> | ota fin | ota cancelar | ota     grabar firmware desde la app (ver 27, BleOtaCb)
+void otaComando(const String& low, Print& out) {
+#if USAR_BLE
+  String c1 = palabra(low, 1);
+  if (c1 == "inicio") {
+    float v = isnan(datos.vel) ? 0 : datos.vel;
+    if (g_motorEnc || v > VEL_MAX_CORTE) { out.println(F("OTA: solo con el motor apagado y la moto parada.")); return; }
+    uint32_t tam = (uint32_t)palabra(low, 2).toInt();
+    String md5 = palabra(low, 3);
+    if (tam < 100000 || md5.length() != 32) { out.println(F("OTA: tamano o md5 invalido.")); return; }
+    if (Update.isRunning()) Update.abort();
+    if (!Update.begin(tam, U_FLASH)) { out.printf("OTA: no se pudo empezar (%s).\n", Update.errorString()); return; }
+    Update.setMD5(md5.c_str());
+    g_otaRecibido = 0; g_otaTotal = tam; g_otaError = false; g_otaUltimo = millis();
+    g_otaActivo = true;
+    out.println(F("OTA listo"));
+  } else if (c1 == "fin") {
+    g_otaActivo = false;
+    if (g_otaError || g_otaRecibido != g_otaTotal) {
+      Update.abort();
+      out.printf("OTA: incompleto (%lu de %lu bytes). Sigue el firmware de antes.\n",
+                 (unsigned long)g_otaRecibido, (unsigned long)g_otaTotal);
+      return;
+    }
+    if (!Update.end()) { out.printf("OTA: no se pudo (%s). Sigue el firmware de antes.\n", Update.errorString()); return; }
+    if (g_nvsSucio) nvsGuardar();
+    out.println(F("OTA ok: reiniciando con el firmware nuevo."));
+    g_reiniciarEn = millis() + 1500;
+  } else if (c1 == "cancelar") {
+    g_otaActivo = false;
+    if (Update.isRunning()) Update.abort();
+    out.println(F("OTA cancelada."));
+  } else {
+    out.printf("{\"ota\":%d,\"rec\":%lu,\"tot\":%lu,\"err\":%d}\n", g_otaActivo ? 1 : 0,
+               (unsigned long)g_otaRecibido, (unsigned long)g_otaTotal, g_otaError ? 1 : 0);
+  }
+#else
+  out.println(F("Sin Bluetooth en esta compilacion."));
+#endif
+}
+
+// Si la app deja de mandar pedazos (se alejó el teléfono, se cerró la app) se cancela: no se queda a medias
+void otaVigilar() {
+#if USAR_BLE
+  if (!g_otaActivo) return;
+  g_ultActividad = millis();                      // no dormirse a media actualización
+  if (millis() - g_otaUltimo > 30000) { g_otaActivo = false; Update.abort(); Serial.println(F("OTA cancelada: sin datos 30 s.")); }
+#endif
+}
+
+//  sd lista | sd leer <archivo> <desde>     la app baja los CSV de la tarjeta (solo estos 4 archivos)
+const char* const SD_ARCHIVOS[] = {"viajes.csv", "eventos.csv", "bateria.csv", "pista.csv", "vibra.csv"};
+const uint8_t NUM_SD_ARCHIVOS = sizeof(SD_ARCHIVOS) / sizeof(SD_ARCHIVOS[0]);
+const size_t SD_PEDAZO = 1500;
+
+void sdComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (!g_sdOk) { out.println(F("Sin tarjeta SD.")); return; }
+  if (c1 == "lista") {
+    // "@SDL" al principio: así la app no la confunde con la lista del mantenimiento (que empieza con "[")
+    out.print(F("@SDL ["));
+    for (uint8_t i = 0; i < NUM_SD_ARCHIVOS; i++) {
+      String ruta = String("/") + SD_ARCHIVOS[i];
+      long t = 0;
+      if (SD.exists(ruta)) { File f = SD.open(ruta); if (f) { t = f.size(); f.close(); } }
+      out.printf("%s{\"n\":\"%s\",\"t\":%ld}", i ? "," : "", SD_ARCHIVOS[i], t);
+    }
+    out.println(']');
+    return;
+  }
+  if (c1 == "leer") {
+    bool permitido = false;
+    for (const char* a : SD_ARCHIVOS) if (c2 == a) permitido = true;
+    if (!permitido) { out.println(F("Archivo no permitido.")); return; }
+    File f = SD.open(String("/") + c2);
+    if (!f) { out.println(F("No existe.")); return; }
+    uint32_t total = f.size();
+    uint32_t desde = min((uint32_t)palabra(low, 3).toInt(), total);
+    f.seek(desde);
+    static uint8_t buf[SD_PEDAZO];
+    size_t n = f.read(buf, SD_PEDAZO);
+    f.close();
+    // Encabezado y luego el texto tal cual (los CSV son solo ASCII)
+    out.printf("@SD %s %lu %u %lu\n", c2.c_str(), (unsigned long)desde, (unsigned)n, (unsigned long)total);
+    out.write(buf, n);
+    return;
+  }
+  out.println(F("Usa: sd lista | sd leer <archivo> <desde>"));
+}
+
+/** Última ubicación conocida (para Telegram): se guarda al terminar cada viaje y al dormirse. */
+void ubicGuardar() {
+  if (!datos.gpsFix || g_modoDemo) return;
+  double u[2] = {datos.lat, datos.lon};
+  prefs.putBytes("ubic", u, sizeof u);
+}
+
+bool ubicLeer(double& la, double& lo) {
+  if (datos.gpsFix && !g_modoDemo) { la = datos.lat; lo = datos.lon; return true; }
+  double u[2];
+  if (prefs.getBytes("ubic", u, sizeof u) != sizeof u || (u[0] == 0 && u[1] == 0)) return false;
+  la = u[0]; lo = u[1];
+  return true;
+}
+
+#if USAR_WIFI
+// ---------- Casa: WiFi de tu casa + tu bot de Telegram ----------
+// Con la moto estacionada en tu casa, cada vez que la tarjeta despierta (15 min de fábrica) se conecta unos segundos
+// a tu WiFi, te avisa lo importante y contesta tus órdenes. Despierta (llave o botones) revisa cada 30 s.
+// Solo obedece a TU chat. Las claves se guardan en la tarjeta (nunca en el código, que es público en GitHub) y
+// solo se cambian por Bluetooth vinculado o USB.
+struct Casa { char ssid[33]; char clave[65]; char token[64]; int64_t chat; uint16_t cadaMin; };
+Casa g_casa;
+RTC_DATA_ATTR int64_t g_tgOffset = -1;     // siguiente mensaje por leer; -1 = recién encendida (no se sabe)
+RTC_DATA_ATTR bool g_tgAvisoBat = false;   // ya se avisó que la batería de la moto está baja
+bool g_tgAvisoCaida = false;
+uint32_t g_tgUltimo = 0;
+
+void casaCargar() {
+  Preferences s;
+  s.begin("casa", true);
+  bool ok = s.getBytesLength("c") == sizeof(Casa) && s.getBytes("c", &g_casa, sizeof(Casa)) == sizeof(Casa);
+  s.end();
+  if (!ok) memset(&g_casa, 0, sizeof g_casa);
+  g_casa.ssid[sizeof(g_casa.ssid) - 1] = g_casa.clave[sizeof(g_casa.clave) - 1] = g_casa.token[sizeof(g_casa.token) - 1] = '\0';
+  if (g_casa.cadaMin < 5 || g_casa.cadaMin > 240) g_casa.cadaMin = 15;
+}
+
+void casaGuardar() {
+  Preferences s;
+  s.begin("casa", false);
+  s.putBytes("c", &g_casa, sizeof g_casa);
+  s.end();
+}
+
+bool tgListo() { return g_casa.ssid[0] && g_casa.token[0] && g_casa.chat != 0; }
+uint32_t casaCadaS() { return tgListo() ? g_casa.cadaMin * 60UL : DESPERTAR_CADA_S; }
+
+bool casaWifiConectar(uint32_t esperaMs) {
+  if (!g_casa.ssid[0]) return false;
+  if (WiFi.status() == WL_CONNECTED) return true;
+  if (WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_STA);
+  WiFi.begin(g_casa.ssid, g_casa.clave);
+  uint32_t t0 = millis();
+  while (WiFi.status() != WL_CONNECTED && millis() - t0 < esperaMs) delay(100);
+  return WiFi.status() == WL_CONNECTED;
+}
+
+String jsonEsc(const String& t) {
+  String r;
+  r.reserve(t.length() + 8);
+  for (size_t i = 0; i < t.length(); i++) {
+    char c = t[i];
+    if (c == '"' || c == '\\') { r += '\\'; r += c; }
+    else if (c == '\n') r += "\\n";
+    else if ((uint8_t)c >= 32) r += c;
+  }
+  return r;
+}
+
+/** Llama a la API de Telegram (HTTPS con el certificado de Telegram verificado). "" si falló. */
+String tgLlamar(const char* metodo, const String& cuerpo) {
+  if (WiFi.status() != WL_CONNECTED || !g_casa.token[0]) return "";
+  NetworkClientSecure cli;
+  cli.setCACert(RAIZ_TELEGRAM);
+  HTTPClient http;
+  http.setConnectTimeout(8000);
+  http.setTimeout(10000);
+  String url = String("https://api.telegram.org/bot") + g_casa.token + "/" + metodo;
+  if (!http.begin(cli, url)) return "";
+  http.addHeader("Content-Type", "application/json");
+  int code = http.POST(cuerpo);
+  String r = (code == 200) ? http.getString() : String("");
+  if (code != 200) Serial.printf("Telegram %s: %d\n", metodo, code);
+  http.end();
+  return r;
+}
+
+bool tgEnviar(const String& texto) {
+  char chat[24];
+  snprintf(chat, sizeof chat, "%lld", (long long)g_casa.chat);
+  return tgLlamar("sendMessage", String("{\"chat_id\":") + chat + ",\"text\":\"" + jsonEsc(texto) + "\"}").length() > 0;
+}
+
+String tgEstado() {
+  String t = String("🏍️ FT150TS ") + FW_VERSION + "\n";
+  float vm = datos.vMoto, vl = datos.vLipo;
+  t += "Batería moto: " + (isnan(vm) ? String("sin dato") : String(vm, 2) + " V (" + estadoBateriaMoto() + ")") + "\n";
+  t += "Batería tarjeta: " + (isnan(vl) ? String("sin dato") : String(vl, 2) + " V, " + porcentajeLipo(vl) + " %") + "\n";
+  t += String("Motor: ") + ((P.corteActivo || g_corteCaida) ? "🔒 bloqueado" : "libre") + " · llave " + (datos.ignicion ? "puesta" : "quitada") + "\n";
+  t += "Odómetro: " + String(P.odometro, 0) + " km · hoy " + String(P.hoy.km, 1) + " km\n";
+  if (!isnan(datos.tempC)) t += "Motor: " + String(datos.tempC, 0) + " °C\n";
+  double la, lo;
+  if (ubicLeer(la, lo)) t += "Ubicación: https://maps.google.com/?q=" + String(la, 6) + "," + String(lo, 6);
+  return t;
+}
+
+String tgResponder(const String& o) {
+  if (o == "/estado" || o == "estado") return tgEstado();
+  if (o == "/bloquear" || o == "/desbloquear") {
+    bool bloquear = o == "/bloquear";
+    TextoPrint tp;
+    bool ok = corteCambiar(bloquear, tp);
+    String r = tp.s;
+    r.trim();
+    if (ok && bloquear) r += "\nSi está dormida, el corte se aplica en cuanto gira la llave.";
+    return (ok ? (bloquear ? "🔒 " : "🔓 ") : "⚠️ ") + r;
+  }
+  if (o == "/salud") {
+    ItemSalud it[5];
+    uint8_t n = saludCalcular(it);
+    String t = "🔧 Estado de la moto\n";
+    for (uint8_t i = 0; i < n; i++)
+      t += String(it[i].puntos >= 80 ? "🟢 " : it[i].puntos >= 50 ? "🟡 " : "🔴 ") + it[i].nombre + " " + String(it[i].puntos) + "/100 · " + it[i].consejo + "\n";
+    return t;
+  }
+  if (o == "/semana") { String t = semanaTexto(); return t.length() ? t : String("Esta semana todavía no hay viajes."); }
+  if (o == "/ubicacion" || o == "/ubicación") {
+    double la, lo;
+    if (!ubicLeer(la, lo)) return "No tengo ubicación guardada todavía.";
+    return "📍 https://maps.google.com/?q=" + String(la, 6) + "," + String(lo, 6);
+  }
+  return "Órdenes: /estado, /salud, /semana, /bloquear, /desbloquear, /ubicacion";
+}
+
+/** Lee los mensajes nuevos de tu chat y los contesta. Recién encendida solo se salta lo pendiente: así una orden
+ *  vieja (p. ej. un /desbloquear de ayer) no se ejecuta tarde. */
+void tgRevisarMensajes() {
+  char cuerpo[112];
+  snprintf(cuerpo, sizeof cuerpo, "{\"offset\":%lld,\"timeout\":0,\"limit\":5,\"allowed_updates\":[\"message\"]}",
+           (long long)(g_tgOffset < 0 ? 0 : g_tgOffset));
+  String r = tgLlamar("getUpdates", cuerpo);
+  if (r.length() == 0) return;
+  bool saltar = g_tgOffset < 0;
+  int pos = 0;
+  while (true) {
+    int u = r.indexOf("\"update_id\":", pos);
+    if (u < 0) break;
+    int sig = r.indexOf("\"update_id\":", u + 12);
+    String trozo = r.substring(u, sig < 0 ? r.length() : sig);
+    pos = u + 12;
+    g_tgOffset = strtoll(r.c_str() + u + 12, nullptr, 10) + 1;
+    if (saltar) continue;
+    int ch = trozo.indexOf("\"chat\":{\"id\":");
+    if (ch < 0 || strtoll(trozo.c_str() + ch + 13, nullptr, 10) != g_casa.chat) continue;   // solo tu chat
+    int tx = trozo.indexOf("\"text\":\"");
+    if (tx < 0) continue;
+    int fin = trozo.indexOf('"', tx + 8);
+    String orden = trozo.substring(tx + 8, fin < 0 ? trozo.length() : fin);
+    orden.trim();
+    orden.toLowerCase();
+    int arroba = orden.indexOf('@');                // "/estado@TuBot"
+    if (arroba > 0) orden = orden.substring(0, arroba);
+    g_ultActividad = millis();
+    tgEnviar(tgResponder(orden));
+  }
+  if (g_tgOffset < 0) g_tgOffset = 0;             // no había nada pendiente
+}
+
+// Despertó por el reloj (estacionada): avisos y órdenes, y vuelve a apagar el WiFi
+void casaAlDespertar() {
+  if (!tgListo()) return;
+  float v = datos.vMoto;
+  bool baja = !isnan(v) && v > 5 && v < BAT_GUARDA_V;
+  if (baja && g_tgAvisoBat) return;              // ya avisaste: ahorra, no prende el WiFi hasta que se recupere
+  if (casaWifiConectar(10000)) {
+    if (baja) { tgEnviar("⚠️ Batería de la moto baja: " + String(v, 2) + " V. Despertaré cada 4 h para cuidarla."); g_tgAvisoBat = true; }
+    else if (!isnan(v) && v > BAT_GUARDA_V + 0.4f) g_tgAvisoBat = false;
+    tgRevisarMensajes();
+    semanaRevisarEnvio();
+  }
+  WiFi.disconnect(true);
+  WiFi.mode(WIFI_OFF);
+}
+
+// Empezó otra semana (lunes): manda el resumen de la que terminó (si no se pudo, se intenta en la siguiente revisión)
+void semanaRevisarEnvio() {
+  uint32_t id = semanaId();
+  if (!id || id == g_semana.id) return;
+  String t = semanaTexto();
+  if (t.length() && !tgEnviar(t)) return;
+  memset(&g_semana, 0, sizeof g_semana);
+  g_semana.magic = MAGIC_SEMANA;
+  g_semana.id = id;
+  semanaGuardar();
+}
+
+// Despierta y estacionada en tu casa: alarma de caída/movimiento y órdenes cada 30 s
+void casaTick() {
+  if (!tgListo() || g_modoDemo || g_otaActivo) return;
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  if (g_motorEnc || v > 3 || WiFi.status() != WL_CONNECTED) return;
+  if (g_caida && !datos.ignicion && !g_tgAvisoCaida) {
+    g_tgAvisoCaida = tgEnviar("🚨 ¡Movieron o tiraron la moto! Inclinación " + String(datos.incl, 0) + "°");
+  }
+  if (!g_caida) g_tgAvisoCaida = false;
+  if (millis() - g_tgUltimo < 30000) return;
+  g_tgUltimo = millis();
+  tgRevisarMensajes();
+  semanaRevisarEnvio();
+}
+
+//  casa | casa ssid <red> | casa clave <clave> | casa tg <token> <chat> | casa cada <min> | casa prueba | casa borrar
+void casaComando(const String& linea, const String& low, Print& out) {
+  String c1 = palabra(low, 1);
+  if (c1 == "") {
+    char ssid[40];
+    textoSeguro(ssid, sizeof ssid, g_casa.ssid);
+    out.printf("{\"casa\":1,\"ssid\":\"%s\",\"clave\":%d,\"tg\":%d,\"chat\":\"%lld\",\"cada\":%u,\"con\":%d}\n", ssid,
+               g_casa.clave[0] ? 1 : 0, g_casa.token[0] ? 1 : 0, (long long)g_casa.chat, g_casa.cadaMin,
+               WiFi.status() == WL_CONNECTED ? 1 : 0);   // las claves nunca salen de la tarjeta
+    return;
+  }
+  if (c1 == "ssid" || c1 == "clave") {
+    String v = restoDesde(linea, 2);
+    char* dst = c1 == "ssid" ? g_casa.ssid : g_casa.clave;
+    size_t cap = c1 == "ssid" ? sizeof g_casa.ssid : sizeof g_casa.clave;
+    if (v.length() >= cap) { out.println(F("Muy largo.")); return; }
+    strncpy(dst, v.c_str(), cap - 1);
+    dst[cap - 1] = '\0';
+    casaGuardar();
+    out.println(c1 == "ssid" ? F("Red de casa guardada.") : F("Clave guardada."));
+    return;
+  }
+  if (c1 == "tg") {
+    String token = palabra(linea, 2);
+    int64_t chat = strtoll(palabra(linea, 3).c_str(), nullptr, 10);
+    if (token.indexOf(':') < 0 || token.length() < 30 || token.length() >= sizeof g_casa.token || chat == 0) {
+      out.println(F("Usa: casa tg <token del bot> <id de tu chat>")); return;
+    }
+    strncpy(g_casa.token, token.c_str(), sizeof(g_casa.token) - 1);
+    g_casa.chat = chat;
+    g_tgOffset = -1;
+    casaGuardar();
+    out.println(F("Telegram guardado."));
+    return;
+  }
+  if (c1 == "cada") {
+    int m = palabra(low, 2).toInt();
+    if (m < 5 || m > 240) { out.println(F("Entre 5 y 240 minutos.")); return; }
+    g_casa.cadaMin = m;
+    casaGuardar();
+    out.printf("Revisará cada %d min estando dormida.\n", m);
+    return;
+  }
+  if (c1 == "borrar") {
+    memset(&g_casa, 0, sizeof g_casa);
+    g_casa.cadaMin = 15;
+    casaGuardar();
+    out.println(F("Datos de casa borrados."));
+    return;
+  }
+  if (c1 == "prueba") {
+    if (!tgListo()) { out.println(F("Falta la red de casa o Telegram.")); return; }
+    if (!casaWifiConectar(10000)) { out.println(F("No pude conectarme al WiFi de casa.")); return; }
+    out.println(tgEnviar("✅ Hola desde tu FT150TS. Escríbeme /estado cuando quieras.")
+                ? F("Mensaje de prueba enviado.") : F("Telegram no respondió: revisa el token y el chat."));
+    return;
+  }
+  out.println(F("Usa: casa | casa ssid ... | casa clave ... | casa tg <token> <chat> | casa cada <min> | casa prueba | casa borrar"));
+}
+#else
+void casaCargar() {}
+bool tgListo() { return false; }
+uint32_t casaCadaS() { return DESPERTAR_CADA_S; }
+void casaAlDespertar() {}
+void casaTick() {}
+void casaComando(const String& linea, const String& low, Print& out) { out.println(F("WiFi desactivado en esta compilacion.")); }
+#endif
 
 #if USAR_WIFI
 // Clave del WiFi de la tarjeta: única por tarjeta (se genera al azar la primera vez y se guarda).
@@ -3030,12 +4159,24 @@ void ejecutarComando(String linea, Print& out) {
   low.toLowerCase();
   if (low.length() == 0) return;
   String c0 = palabra(low, 0), c1 = palabra(low, 1), c2 = palabra(low, 2), c3 = palabra(low, 3);
-  g_ultActividad = millis();
+  // Lo que la app manda sola (ubicación cada segundo, consultas al conectarse) no cuenta como uso: con la llave
+  // apagada y el teléfono cerca la tarjeta nunca se dormía y se comía la batería de la moto.
+  bool automatico = c0 == "gps" || c0 == "hora" || c0 == "cfgjson" || c0 == "mantjson" || c0 == "tel" || c0 == "luz" ||
+                    c0 == "salud" ||
+                    ((c0 == "av" || c0 == "casa" || c0 == "rele" || c0 == "alarma" || c0 == "vibra" || c0 == "llave") && c1 == "");
+  if (!automatico) g_ultActividad = millis();
 
   if (c0 == "ayuda" || c0 == "help") mostrarAyuda(out);
   else if (c0 == "estado") mostrarEstado(out);
-  else if (c0 == "demo") { g_modoDemo = true; out.println(F("Modo demo activado.")); }
-  else if (c0 == "real") { g_modoDemo = false; nvsCargar(); memset(&g_viaje, 0, sizeof(g_viaje)); out.println(F("Sensores reales.")); }
+  else if (c0 == "demo") {
+    if (!g_modoDemo && g_nvsSucio) nvsGuardar();   // los km sin guardar no se pierden al volver con "real"
+    g_modoDemo = true; out.println(F("Modo demo activado."));
+  }
+  else if (c0 == "real") {
+    // Solo al salir del demo se recargan los datos guardados (si ya estaba en real, se perdían los km sin guardar)
+    if (g_modoDemo) { g_modoDemo = false; nvsCargar(); memset(&g_viaje, 0, sizeof(g_viaje)); }
+    out.println(F("Sensores reales."));
+  }
   else if (c0 == "pantalla") { int n = c1.toInt(); if (n >= 0 && n < V_TOTAL) { pantallaIrA((Vista)n); out.println(NOMBRE_VISTA[n]); } }
   else if (c0 == "perfil") { P.perfil = (c1 == "sport") ? 1 : 0; shiftInit(); nvsGuardar(); out.println(P.perfil ? "SPORT" : "ECO"); }
   else if (c0 == "vel") { P.fuenteVel = (c1 == "hall") ? 1 : (c1 == "gps") ? 2 : 0; nvsGuardar(); out.println(F("Fuente de velocidad cambiada.")); }
@@ -3154,6 +4295,21 @@ void ejecutarComando(String linea, Print& out) {
     out.println(F("Simulando."));
   }
   else if (c0 == "backup") hacerBackup(out);
+#if USAR_BLE
+  else if (c0 == "tel") { g_telBin = (c1 == "bin"); out.println(g_telBin ? F("Telemetria binaria.") : F("Telemetria JSON.")); }
+#endif
+  else if (c0 == "salud") saludJson(out);
+  else if (c0 == "llave") llaveComando(low, out);
+  else if (c0 == "rele") releComando(low, out);
+  else if (c0 == "alarma") alarmaComando(low, out);
+  else if (c0 == "vibra") vibraComando(low, out);
+  else if (c0 == "luz") {          // lo manda la app (sensor de luz del teléfono, sin LDR): luz <0-100>, sin respuesta
+    g_luzApp = constrain((int)c1.toInt(), 0, 100);
+    g_luzAppMs = millis();
+  }
+  else if (c0 == "ota") otaComando(low, out);
+  else if (c0 == "sd") sdComando(low, out);
+  else if (c0 == "casa") casaComando(linea, low, out);
   else if (c0 == "dormir") { out.println(F("Durmiendo...")); irADormir(false); }
   else if (c0 == "borrar" && c1 == "todo" && c2 == "confirmar") {
     nvsDefaults(); prefs.putBytes("p", &P, sizeof(P)); shiftInit(); out.println(F("Valores de fabrica."));
@@ -3167,7 +4323,7 @@ void leerConsola() {
     char c = Serial.read();
     if (c == '\n' || c == '\r') {
       if (buf.length()) { ejecutarComando(buf, Serial); buf = ""; }
-    } else if (buf.length() < 80) buf += c;
+    } else if (buf.length() < 120) buf += c;   // "casa clave ..." puede ser larga
   }
 }
 
@@ -3215,11 +4371,14 @@ const char PAGINA[] PROGMEM =
 
 void webBegin() {
   if (!P.wifiOn) return;
-  bool sta = strcmp(STA_SSID, "X") != 0;
+  // WiFi de casa: el que guardaste desde la app ("casa ssid/clave") o, si no, el del código (STA_SSID)
+  bool casa = g_casa.ssid[0] != '\0';
+  bool sta = casa || strcmp(STA_SSID, "X") != 0;
   WiFi.mode(sta ? WIFI_AP_STA : WIFI_AP);
   apClavePreparar();                       // ya con la radio prendida: el azar es de verdad
   WiFi.softAP(AP_SSID, g_apClave);
-  if (sta) WiFi.begin(STA_SSID, STA_PASS);
+  if (casa) WiFi.begin(g_casa.ssid, g_casa.clave);
+  else if (sta) WiFi.begin(STA_SSID, STA_PASS);
 
   server.on("/", []() { server.send_P(200, "text/html", PAGINA); });
   server.on("/api", []() { server.send(200, "application/json", jsonDatos()); });
@@ -3297,8 +4456,34 @@ void backupAutomatico() {
 // ================================================================
 // Tres mensajes JSON cortos (caben en un paquete BLE de 244 bytes):
 //   "t" rápido (cada 250 ms): velocidad, rpm, marcha, batería, gasolina...
+//       Con "tel bin" (app v3.11+) va en binario cada 100 ms (ver binRapido).
 //   "s" estado (cada 1 s):    Li-ion, GPS, alerta, corte, perfil...
 //   "x" viaje  (cada 2 s):    odómetro, viaje, hoy/ayer, autonomía...
+
+/**
+ * Mensaje rápido en binario: 18 bytes, números enteros little-endian (la app lo lee en Protocolo.parseRapidaBin).
+ *  0 0xB1 · 1 vel×10 (i16, -10 = sin dato) · 3 rpm (u16, 0xFFFF = sin dato) · 5 marcha (i8) · 6 V moto×100 (u16)
+ *  8 gasolina % (i8) · 9 temp×10 (i16, -990 = sin dato) · 11 incl×10 (i16) · 13 aFwd×100 (i16) · 15 punto de cambio (u16)
+ *  17 banderas: 1 = llave, 2 = motor encendido, 4 = freno, 8 = direccional, 16 = direccional olvidada,
+ *     32 = vibración rara
+ */
+int binRapido(uint8_t* b) {
+  auto i16 = [b](int k, long v) { v = constrain(v, -32768L, 32767L); b[k] = v & 0xFF; b[k + 1] = (v >> 8) & 0xFF; };
+  auto u16 = [b](int k, long v) { v = constrain(v, 0L, 65535L); b[k] = v & 0xFF; b[k + 1] = (v >> 8) & 0xFF; };
+  b[0] = 0xB1;
+  i16(1, isnan(datos.vel) ? -10 : lroundf(datos.vel * 10));
+  u16(3, datos.rpm < 0 ? 0xFFFF : min(datos.rpm, 65534));
+  b[5] = (uint8_t)(int8_t)datos.marcha;
+  u16(6, isnan(datos.vMoto) ? 0xFFFF : lroundf(datos.vMoto * 100));
+  b[8] = (uint8_t)(int8_t)constrain(datos.gasPct, -1, 100);
+  i16(9, isnan(datos.tempC) ? -990 : lroundf(datos.tempC * 10));
+  i16(11, isnan(datos.incl) ? -10 : lroundf(datos.incl * 10));
+  i16(13, lroundf(datos.aFwd * 100));
+  u16(15, lroundf(puntoCambioActual()));
+  b[17] = (datos.ignicion ? 1 : 0) | (g_motorEnc ? 2 : 0) | (datos.freno ? 4 : 0) | (datos.direccional ? 8 : 0) |
+          (datos.dirOlvidada ? 16 : 0) | (datos.vibraAlerta ? 32 : 0);
+  return 18;
+}
 void textoSeguro(char* dst, size_t n, const char* src) {
   size_t j = 0;
   for (size_t i = 0; src[i] && j < n - 1; i++) {
@@ -3312,11 +4497,12 @@ void textoSeguro(char* dst, size_t n, const char* src) {
 int jsonRapido(char* b, size_t n) {
   return snprintf(b, n,
     "{\"k\":\"t\",\"v\":%.1f,\"r\":%d,\"m\":%d,\"b\":%.2f,\"g\":%d,\"t\":%.1f,"
-    "\"i\":%.1f,\"a\":%.2f,\"sp\":%d,\"ig\":%d,\"me\":%d}",
+    "\"i\":%.1f,\"a\":%.2f,\"sp\":%d,\"ig\":%d,\"me\":%d,\"fr\":%d,\"di\":%d,\"do\":%d,\"va\":%d}",
     isnan(datos.vel) ? -1.0f : datos.vel, datos.rpm, datos.marcha,
     isnan(datos.vMoto) ? -1.0f : datos.vMoto, datos.gasPct,
     isnan(datos.tempC) ? -99.0f : datos.tempC, isnan(datos.incl) ? -1.0f : datos.incl,
-    datos.aFwd, (int)puntoCambioActual(), datos.ignicion ? 1 : 0, g_motorEnc ? 1 : 0);
+    datos.aFwd, (int)puntoCambioActual(), datos.ignicion ? 1 : 0, g_motorEnc ? 1 : 0,
+    datos.freno ? 1 : 0, datos.direccional ? 1 : 0, datos.dirOlvidada ? 1 : 0, datos.vibraAlerta ? 1 : 0);
 }
 
 int jsonEstado(char* b, size_t n) {
@@ -3325,11 +4511,12 @@ int jsonEstado(char* b, size_t n) {
   if (construirAlerta(al, sizeof al, ic)) textoSeguro(alSeg, sizeof alSeg, al);
   return snprintf(b, n,
     "{\"k\":\"s\",\"l\":%.2f,\"lp\":%d,\"f\":%d,\"la\":%.6f,\"lo\":%.6f,\"sa\":%d,"
-    "\"es\":\"%s\",\"c\":%d,\"d\":%d,\"pf\":%d,\"ge\":%d,\"ip\":%d,\"al\":\"%s\"}",
+    "\"es\":\"%s\",\"c\":%d,\"d\":%d,\"pf\":%d,\"ge\":%d,\"ip\":%d,\"al\":\"%s\",\"cg\":%d,\"aa\":%d,\"vs\":%.1f,\"fn\":%lu}",
     isnan(datos.vLipo) ? -1.0f : datos.vLipo, porcentajeLipo(datos.vLipo), datos.gpsFix ? 1 : 0,
     datos.lat, datos.lon, datos.sats, estadoBateriaMoto(),
     (P.corteActivo || g_corteCaida) ? 1 : 0, g_modoDemo ? 1 : 0, P.perfil, g_gpsExterno ? 1 : 0,
-    g_iphone.conectado ? 1 : 0, alSeg);
+    g_iphone.conectado ? 1 : 0, alSeg,
+    g_cargando ? 1 : 0, g_alarmaArmada ? 1 : 0, g_vbScore, (unsigned long)g_frenadas);
 }
 
 int jsonViaje(char* b, size_t n) {
@@ -3344,6 +4531,24 @@ int jsonViaje(char* b, size_t n) {
 
 #if USAR_BLE
 // Manda a la app (o apps) conectadas, pero no al iPhone: él no entiende estos datos
+// Avisos cortos para la app (bache, recarga de gasolina, moto movida): se encolan desde cualquier parte del loop y
+// salen en la siguiente vuelta de bleActualizar. Si no hay app conectada se descartan (ya quedaron en la SD).
+const uint8_t COLA_EVT = 4;
+char g_evtCola[COLA_EVT][100];
+uint8_t g_evtN = 0;
+/** Llave de proximidad: ¿hay un teléfono vinculado (el POCO o el iPhone) conectado con el enlace cifrado? */
+bool telefonoCerca() {
+  for (uint8_t i = 0; i < MAX_CONEX; i++) if (g_conex[i].usada && g_conex[i].cifrada) return true;
+  return false;
+}
+
+void bleEvento(const char* json) {
+  if (!g_bleConectado || g_evtN >= COLA_EVT) return;
+  strncpy(g_evtCola[g_evtN], json, sizeof(g_evtCola[0]) - 1);
+  g_evtCola[g_evtN][sizeof(g_evtCola[0]) - 1] = '\0';
+  g_evtN++;
+}
+
 void bleNotificar(BLECharacteristic* ch, const char* txt, size_t len) {
   if (!ch || !g_bleConectado || g_gattsIf == ESP_GATT_IF_NONE) return;
   ch->setValue((uint8_t*)txt, len);
@@ -3463,12 +4668,19 @@ void bleActualizar() {
 
   // 2) Telemetría
   if (!g_bleConectado) return;
+  for (uint8_t i = 0; i < g_evtN; i++) bleNotificar(g_chTel, g_evtCola[i], strlen(g_evtCola[i]));
+  g_evtN = 0;
   uint32_t ms = millis();
   char b[244];
-  if (ms - g_ultTelRapida >= 250) {
+  if (ms - g_ultTelRapida >= (g_telBin ? 100u : 250u)) {
     g_ultTelRapida = ms;
-    int n = jsonRapido(b, sizeof b);
-    if (n > 0) bleNotificar(g_chTel, b, min(n, (int)sizeof(b) - 1));
+    if (g_telBin) {
+      uint8_t bb[18];
+      bleNotificar(g_chTel, (const char*)bb, binRapido(bb));
+    } else {
+      int n = jsonRapido(b, sizeof b);
+      if (n > 0) bleNotificar(g_chTel, b, min(n, (int)sizeof(b) - 1));
+    }
   }
   if (ms - g_ultTelLenta >= 1000) {
     g_ultTelLenta = ms;
@@ -3493,9 +4705,10 @@ void periferico(bool encendido) {
 
 void irADormir(bool porTimer) {
 #if USAR_DORMIR
-  if (g_modoDemo) return;
+  if (g_modoDemo || g_otaActivo) return;
   if (!porTimer) {
     viajeTerminar();
+    ubicGuardar();                  // dónde quedó estacionada (para /ubicacion en Telegram)
     P.vMotoDormir = voltajeMoto();
     P.vLipoDormir = voltajeLipo();
     P.epochDormir = g_rtcOk ? ahoraEpoch() : 0;
@@ -3503,12 +4716,26 @@ void irADormir(bool porTimer) {
     leds.clear(); leds.show();
     lcd.clear();
     lcd.noBacklight();
-#if USAR_WIFI
-    WiFi.mode(WIFI_OFF);
-#endif
+    if (g_vbSucio) vibraGuardar(true);   // lo que aprendió la IA en este viaje
     periferico(false);
   }
-  esp_sleep_enable_timer_wakeup((uint64_t)DESPERTAR_CADA_S * 1000000ULL);
+#if USAR_WIFI
+  WiFi.mode(WIFI_OFF);
+#endif
+  // Dormida no hay relevadores ni carga (sin 5 V de control se sueltan solos; así queda explícito)
+  g_rele2 = g_rele3 = g_salida = false;
+  g_sirenaHasta = 0;
+  salidasAplicar();
+  digitalWrite(PIN_CARGA, LOW);
+  // Cada cuánto despierta: con Telegram lo que elegiste (15 min de fábrica); si no, cada hora.
+  // Protector de batería: con la batería de la moto baja despierta cada 4 h (y casaAlDespertar no prende el WiFi).
+  // Después de una alarma: en 5 min (y entonces vuelve a vigilar).
+  uint32_t cada = casaCadaS();
+  float vb = voltajeMoto();
+  if (!isnan(vb) && vb > 5 && vb < BAT_GUARDA_V) cada = DORMIR_GUARDA_S;
+  if (g_alarmaPausa) cada = min(cada, (uint32_t)300);
+  esp_sleep_enable_timer_wakeup((uint64_t)cada * 1000000ULL);
+  alarmaAlDormir();                      // el MPU vigila y su pin INT puede despertarla (si hay a quién avisar)
   uint64_t mascara = (1ULL << PIN_BTN_OK) | (1ULL << PIN_BTN_ARRIBA) | (1ULL << PIN_BTN_ABAJO);
 #if USAR_IGNICION
   mascara |= (1ULL << PIN_IGNICION);
@@ -3541,6 +4768,8 @@ void despertarPorTimer() {
   if (g_rtcOk && P.epochDormir > 0 && ahoraEpoch() - P.epochDormir > 7200) registrarReposoDiario(datos.vMoto);
   logBaterias();
   if (g_nvsSucio) nvsGuardar();
+  casaAlDespertar();               // Telegram: avisos (batería baja) y tus órdenes, si lo configuraste
+  g_alarmaPausa = false;           // ya pasó el rato después de una alarma: vuelve a vigilar
   irADormir(true);
 }
 
@@ -3559,6 +4788,8 @@ void setup() {
     const uint8_t p[4] = {PIN_BTN_OK, PIN_BTN_ARRIBA, PIN_BTN_ABAJO, PIN_IGNICION};
     rtc_gpio_deinit((gpio_num_t)p[i]);   // regresa los pines a modo normal tras dormir
   }
+  if (PIN_MPU_INT >= 0) rtc_gpio_deinit((gpio_num_t)PIN_MPU_INT);
+  placaBegin();    // relevadores 2/3, salida y carga apagados; entradas aisladas
   botonesBegin();
   adcBegin();
   nvsCargar();
@@ -3569,9 +4800,16 @@ void setup() {
   g_rtcOk = rtc.begin(&Wire);
   if (g_rtcOk && rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   sdBegin();
+  casaCargar();    // WiFi de casa y Telegram (los usa también el despertar por reloj)
+  alarmaCargar();
+  llaveCargar();
+  semanaCargar();
+  vibraCargar();
 
 #if USAR_DORMIR
-  if (esp_sleep_get_wakeup_cause() == ESP_SLEEP_WAKEUP_TIMER) despertarPorTimer();
+  esp_sleep_wakeup_cause_t causa = esp_sleep_get_wakeup_cause();
+  if (causa == ESP_SLEEP_WAKEUP_TIMER) despertarPorTimer();
+  if (causa == ESP_SLEEP_WAKEUP_EXT0) despertarPorMovimiento();   // regresa solo si giraste la llave (eres tú)
 #endif
 
   periferico(true);
@@ -3582,6 +4820,9 @@ void setup() {
   pantallaSplash();
   g_imuOk = imuBegin();
   tempBegin();
+  // Búfer más grande: a 9600 baudios los 256 bytes de fábrica se llenan en ~0.27 s y se perdían frases del GPS
+  // mientras loop() estaba ocupado (escribiendo la SD o el respaldo por WiFi)
+  GPSSerial.setRxBufferSize(1024);
   GPSSerial.begin(9600, SERIAL_8N1, PIN_GPS_RX, PIN_GPS_TX);
   attachInterrupt(digitalPinToInterrupt(PIN_RPM), isrRpm, FALLING);
   attachInterrupt(digitalPinToInterrupt(PIN_HALL), isrHall, FALLING);
@@ -3594,6 +4835,8 @@ void setup() {
   g_modoDemo = DEMO_AL_INICIAR;
 #if USAR_WIFI
   webBegin();
+  // Con la página WiFi apagada igual se conecta al WiFi de casa (para Telegram), sin esperar
+  if (!g_wifiIniciado && g_casa.ssid[0]) { WiFi.mode(WIFI_STA); WiFi.begin(g_casa.ssid, g_casa.clave); }
 #endif
 #if USAR_BLE
   bleBegin();
@@ -3636,7 +4879,13 @@ void loop() {
     if (++cuenta >= 2) { cuenta = 0; shiftAprender(dt * 2 / 1000.0f); }
     avanzadoTick();
     releAplicar();
+    entradasActualizar(dt);
+    cargaActualizar();
+    salidasAplicar();
+    alarmaTick();
+    llaveTick();
   }
+  vibraActualizar();
 
   ledsActualizar();
 
@@ -3658,5 +4907,7 @@ void loop() {
   if (ms - g_ultLogBat > LOG_BAT_MS) { g_ultLogBat = ms; logBaterias(); }
   if (g_nvsSucio && ms - g_ultimoGuardado > 300000) nvsGuardar();
 
+  otaVigilar();
+  casaTick();
   revisarDormir();
 }

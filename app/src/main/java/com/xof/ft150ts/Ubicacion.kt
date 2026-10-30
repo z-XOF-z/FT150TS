@@ -94,7 +94,7 @@ object UbicacionManager {
     private var primerFixChip = 0L
     /** Android 12+: el respaldo es el fusionado de Google en alta precisión (usa los mismos satélites). */
     private var respaldoFused = false
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private val principal = Handler(Looper.getMainLooper())
 
     /*

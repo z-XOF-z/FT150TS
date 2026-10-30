@@ -64,7 +64,7 @@ object Arrancones {
     private var ctx: Context? = null
     private var prefs: SharedPreferences? = null
     private var sm: SensorManager? = null
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var trabajo: Job? = null
     private var abierto = false
 

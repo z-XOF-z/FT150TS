@@ -138,8 +138,10 @@ private class GeoMorado(val s: Size, margenInf: Float) {
     /** Punto y normal a la fracción [t] (0..1) del largo del arco. */
     fun en(t: Float): Pair<Offset, Offset> {
         val d = t.coerceIn(0f, 1f) * largo
+        // Primer tramo que llega a d (búsqueda binaria: se llama cientos de veces por cuadro)
         var i = 1
-        while (i < largoAcum.size - 1 && largoAcum[i] < d) i++
+        var hi = largoAcum.size - 1
+        while (i < hi) { val mid = (i + hi) ushr 1; if (largoAcum[mid] < d) i = mid + 1 else hi = mid }
         val d0 = largoAcum[i - 1]; val d1 = largoAcum[i]
         val f = if (d1 > d0) (d - d0) / (d1 - d0) else 0f
         val pt = muestras[i - 1] + (muestras[i] - muestras[i - 1]) * f
@@ -192,13 +194,24 @@ internal fun TableroMorado() {
                     pintarFijo(g, medidor)
                 }
                 val p = Path()
+                // Rendimiento: las 121 rayitas del arco siempre caen en el mismo lugar; se calculan una vez por tamaño y
+                // se dibujan con una sola llamada (antes eran hasta 120 drawLine por cuadro)
+                val rayas = FloatArray(121 * 4).also { a ->
+                    for (i in 0..120) {
+                        val (pt, nn) = g.en(i / 120f)
+                        a[i * 4] = pt.x; a[i * 4 + 1] = pt.y; a[i * 4 + 2] = pt.x + nn.x * g.banda; a[i * 4 + 3] = pt.y + nn.y * g.banda
+                    }
+                }
+                val pinturaRayas = android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG).apply {
+                    color = FONDO.copy(alpha = 0.55f).toArgb(); strokeWidth = g.u * 0.22f
+                }
                 onDrawBehind {
                     drawImage(fijo)
                     val r = rS.value
                     val prueba = pruebaSegmentos(arrS.value)
                     picos.anotar(r.aFwd)
                     pintarDatos(
-                        g, medidor, p, prueba,
+                        g, medidor, p, rayas, pinturaRayas, prueba,
                         vel = if (prueba) 888f else velS.value, rpm = rpm.value, shift = r.shift, marcha = r.marcha,
                         temp = r.temp, volt = r.vMoto, gas = r.gas, sport = eS.value.perfil == 1,
                         gMax = picos.max, gMin = picos.min,
@@ -428,13 +441,15 @@ private fun DrawScope.pintarFijo(g: GeoMorado, m: TextMeasurer) {
     val finD = Path().apply { moveTo(g.x(0.85f), g.y(0.835f)); lineTo(g.x(0.97f), g.y(0.835f)) }
     halo(finD, PRIMARIO, u * 1.0f, u * 1.6f)
     drawPath(finD, tinteMorado(Color(0xFFE6B5FF)), style = Stroke(u * 0.35f))
+    // Ecualizador apagado (las encendidas se pintan encima en cada cuadro; sus colores son opacos)
+    for (b in 0 until EQ_BARRAS) for (f in 0 until EQ_FILAS) celdaEq(g, b, f, SECUNDARIO.copy(alpha = 0.10f))
 }
 
 // ============================================================
 // Lo que cambia
 // ============================================================
 private fun DrawScope.pintarDatos(
-    g: GeoMorado, m: TextMeasurer, p: Path, prueba: Boolean,
+    g: GeoMorado, m: TextMeasurer, p: Path, rayasArco: FloatArray, pinturaRayas: android.graphics.Paint, prueba: Boolean,
     vel: Float, rpm: Float, shift: Int, marcha: Int, temp: Float, volt: Float, gas: Int, sport: Boolean,
     gMax: Float, gMin: Float, historial: List<Float>,
 ) {
@@ -444,9 +459,10 @@ private fun DrawScope.pintarDatos(
     // ---- Arco encendido: relleno con degradado + rayitas oscuras encima (marcas finas) ----
     if (t > 0.002f) {
         val pasos = max(2, (t * 160).toInt())
+        val puntos = Array(pasos + 1) { g.en(t * it / pasos) }   // una vez por cuadro (antes se calculaban 3 veces)
         p.reset()
-        for (i in 0..pasos) { val (pt, _) = g.en(t * i / pasos); if (i == 0) p.moveTo(pt.x, pt.y) else p.lineTo(pt.x, pt.y) }
-        for (i in pasos downTo 0) { val (pt, nn) = g.en(t * i / pasos); p.lineTo(pt.x + nn.x * g.banda, pt.y + nn.y * g.banda) }
+        for (i in 0..pasos) { val (pt, _) = puntos[i]; if (i == 0) p.moveTo(pt.x, pt.y) else p.lineTo(pt.x, pt.y) }
+        for (i in pasos downTo 0) { val (pt, nn) = puntos[i]; p.lineTo(pt.x + nn.x * g.banda, pt.y + nn.y * g.banda) }
         p.close()
         val inicio = g.en(0f).first; val final = g.en(1f).first
         val brocha = Brush.linearGradient(
@@ -456,13 +472,10 @@ private fun DrawScope.pintarDatos(
         drawPath(p, brocha)
         // rayitas finas (como un LCD de barras) solo sobre lo encendido
         val rayas = (t * 120).toInt()
-        for (i in 0..rayas) {
-            val (pt, nn) = g.en(i / 120f)
-            drawLine(FONDO.copy(alpha = 0.55f), pt, Offset(pt.x + nn.x * g.banda, pt.y + nn.y * g.banda), u * 0.22f)
-        }
+        drawIntoCanvas { it.nativeCanvas.drawLines(rayasArco, 0, (rayas + 1) * 4, pinturaRayas) }
         // filo de luz por fuera (como el borde brillante del concepto)
         p.reset()
-        for (i in 0..pasos) { val (pt, _) = g.en(t * i / pasos); if (i == 0) p.moveTo(pt.x, pt.y) else p.lineTo(pt.x, pt.y) }
+        for (i in 0..pasos) { val (pt, _) = puntos[i]; if (i == 0) p.moveTo(pt.x, pt.y) else p.lineTo(pt.x, pt.y) }
         drawPath(p, ACENTO.copy(alpha = 0.25f), style = Stroke(u * 1.6f, cap = StrokeCap.Round))
         drawPath(p, tinteMorado(Color(0xFFF1D6FF)), style = Stroke(u * 0.35f, cap = StrokeCap.Round))
         // punta brillante
@@ -498,20 +511,15 @@ private fun DrawScope.pintarDatos(
 
     // ---- Ecualizador: las últimas RPM (más la actual) en barras de puntitos ----
     run {
-        val r = g.ecualizador
-        val barras = 18
-        val bw = r.width / barras
-        val filas = 12
-        val fh = r.height / filas
-        val datos = (historial.takeLast(barras - 1) + rpm)
-        for (b in 0 until barras) {
-            val v = datos.getOrNull(datos.size - barras + b) ?: 0f
+        val datos = (historial.takeLast(EQ_BARRAS - 1) + rpm)
+        for (b in 0 until EQ_BARRAS) {
+            val v = datos.getOrNull(datos.size - EQ_BARRAS + b) ?: 0f
             // un poco de vida aunque esté quieta (como en el concepto)
-            val nivel = ((v / TOPE) * filas + if (v <= 0f) (1 + (b * 7) % 3) else 0).toInt().coerceIn(1, filas)
-            for (f in 0 until filas) {
-                val on = f < nivel
-                val col = when { !on -> SECUNDARIO.copy(alpha = 0.10f); f > filas * 0.8f -> ACENTO; f > filas * 0.5f -> PRIMARIO; else -> SECUNDARIO }
-                drawRect(col, Offset(r.left + b * bw + bw * 0.15f, r.bottom - (f + 1) * fh + fh * 0.18f), Size(bw * 0.7f, fh * 0.64f))
+            val nivel = ((v / TOPE) * EQ_FILAS + if (v <= 0f) (1 + (b * 7) % 3) else 0).toInt().coerceIn(1, EQ_FILAS)
+            // Solo las encendidas: las apagadas ya están en la capa fija (antes eran 216 rectángulos por cuadro)
+            for (f in 0 until nivel) {
+                val col = when { f > EQ_FILAS * 0.8f -> ACENTO; f > EQ_FILAS * 0.5f -> PRIMARIO; else -> SECUNDARIO }
+                celdaEq(g, b, f, col)
             }
         }
     }
@@ -561,6 +569,17 @@ private fun DrawScope.pintarDatos(
 
     // ---- MODO y barra superior ----
     texto(m, if (sport) "RACE" else "ECO", g.modo.center, estiloM(u * 4.2f, PRIMARIO, Fuentes.logo, FontWeight.Normal, brillo = PRIMARIO, radio = u * 1.5f, d = this), alinear = 0.5f)
+}
+
+private const val EQ_BARRAS = 18
+private const val EQ_FILAS = 12
+
+/** Una celda del ecualizador (barra [b], fila [f] desde abajo). */
+private fun DrawScope.celdaEq(g: GeoMorado, b: Int, f: Int, col: Color) {
+    val r = g.ecualizador
+    val bw = r.width / EQ_BARRAS
+    val fh = r.height / EQ_FILAS
+    drawRect(col, Offset(r.left + b * bw + bw * 0.15f, r.bottom - (f + 1) * fh + fh * 0.18f), Size(bw * 0.7f, fh * 0.64f))
 }
 
 internal fun DrawScope.flechita(c: Offset, s: Float, arriba: Boolean, color: Color) {

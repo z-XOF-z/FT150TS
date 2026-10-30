@@ -981,7 +981,8 @@ private fun SeccionPantalla() {
         )
         Text(
             when (Apariencia.pantalla) {
-                PantallaEncendida.SIEMPRE -> "No se apaga mientras la app esté abierta."
+                PantallaEncendida.SIEMPRE -> "En la moto no se apaga. Fuera de ella, en tus apps se apaga como siempre " +
+                    "y en las demás páginas después de 10 min sin tocarla (para que no se descargue en la casa)."
                 PantallaEncendida.CON_MOTO -> "No se apaga mientras esté en la moto: conectada por Bluetooth o cargando " +
                     "con el switch prendido (Modo moto). Al apagar la moto se apaga sola."
                 PantallaEncendida.NORMAL -> "Se apaga sola como siempre, según tu teléfono."
@@ -1344,6 +1345,7 @@ private fun SeccionModoMoto() {
     val alMontar by Energia.abrirAlMontar.collectAsStateWithLifecycle()
     val fondo by Energia.segundoPlano.collectAsStateWithLifecycle()
     val cargando by Energia.cargando.collectAsStateWithLifecycle()
+    val pc by Energia.enComputadora.collectAsStateWithLifecycle()
     val enMoto by Energia.enMoto.collectAsStateWithLifecycle()
     val dormida by ModoSueno.dormido.collectAsStateWithLifecycle()
     val rootActivo by Root.activo.collectAsStateWithLifecycle()
@@ -1369,6 +1371,7 @@ private fun SeccionModoMoto() {
             when {
                 dormida -> "Modo sueño (cargando quieto)"
                 enMoto -> "En la moto"
+                cargando && pc -> "Conectado a la computadora (no cuenta como la moto)"
                 cargando -> "Cargando (no en la moto)"
                 else -> "En la mano"
             },

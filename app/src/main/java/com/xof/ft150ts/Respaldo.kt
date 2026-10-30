@@ -39,7 +39,7 @@ object Respaldo {
     val ultimoAuto = MutableStateFlow(0L)
     val ultimoManual = MutableStateFlow(0L)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main + Seguro.manejador)
     private var ctx: Context? = null
 
     fun iniciar(c: Context) {

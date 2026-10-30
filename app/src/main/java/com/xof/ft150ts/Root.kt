@@ -26,7 +26,7 @@ object Root {
     /** Gestos de pantalla completa de Xiaomi aunque esta app sea el launcher (experimental). */
     val gestos = MutableStateFlow(false)
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO + Seguro.manejador)
     private var prefs: SharedPreferences? = null
     private val PAQUETE_VALIDO = Regex("^[A-Za-z0-9_.]+$")
 
