@@ -12,8 +12,8 @@ android {
         applicationId = "com.xof.ft150ts"
         minSdk = 26          // Android 8.0 o más nuevo
         targetSdk = 35
-        versionCode = 52
-        versionName = "3.11.0-beta.1"
+        versionCode = 56
+        versionName = "3.12.0"
     }
 
     buildTypes {

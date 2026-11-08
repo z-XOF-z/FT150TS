@@ -178,6 +178,31 @@ object CarPlayPestana {
         scope.launch { if (!trabajando && !deseado.value) revisarEscondida(ctx) }
     }
 
+    /**
+     * La zona Wi-Fi se acaba de prender y DiPlay ya estaba abierto: arrancó con la zona apagada, falló ("The car
+     * hotspot is off") y se queda esperando para siempre (visto el 2026-10-31: 5½ min sin conectar hasta tocarlo a
+     * mano). Se cierra y, si CarPlay debe verse, se vuelve a abrir solo, ya con la zona arriba.
+     */
+    fun reiniciarTrasZona() {
+        val ctx = app ?: return
+        if (!hayVentana || !disponible() || CarPlay.modo.value != ModoCarPlay.PESTANA) return
+        scope.launch {
+            delay(ESPERA_ZONA_MS)                     // que la zona termine de levantar antes de que DiPlay la busque
+            val d = CarPlay.buscar(ctx)?.takeIf { it.confiable } ?: return@launch
+            if (!ProtocoloCarPlay.paqueteSeguro(d.paquete) || !hayVentana) return@launch
+            Root.ejecutarCada(listOf("am force-stop ${d.paquete}"))
+            hayVentana = false
+            tarea = -1
+            mostrados = null
+            visible.value = false
+            evento.value = "Se prendió la zona Wi-Fi: reinicié DiPlay para que CarPlay conecte"
+            log(evento.value)
+            if (deseado.value) trabajar()
+        }
+    }
+
+    private const val ESPERA_ZONA_MS = 3_000L
+
     /** Se olvida el tamaño (cambió el área o el tamaño elegido). La escala del sistema se conserva. */
     fun reiniciarMedidas() { mostrados = null; sinBarras = null }
 
@@ -312,7 +337,7 @@ object CarPlayPestana {
         if (previo != null && tarea >= 0 && escala > 0f && previo.contentEquals(ProtocoloCarPlay.aLaMedida(a, escala))) {
             Root.ejecutarCada(listOf(ProtocoloCarPlay.cmdRedimensionar(tarea, previo)))
             visible.value = true
-            if (quedoBien(previo)) return
+            if (quedoBien(previo)) { asentar(previo); return }
             evento.value = "CarPlay no quedó en su lugar: se recoloca"
         }
         // Completo (y se recoloca hasta 3 veces si no quedó donde debía)
@@ -320,6 +345,7 @@ object CarPlayPestana {
             if (!deseado.value) return
             if (colocarCompleto(ctx, a) && quedoBien(mostrados)) {
                 evento.value = "CarPlay en la pestaña" + if (intento > 1) " (recolocado, intento $intento)" else ""
+                mostrados?.let { asentar(it) }
                 return
             }
             delay(300L * intento)
@@ -359,6 +385,23 @@ object CarPlayPestana {
         mostrados = b
         visible.value = true
         return true
+    }
+
+    /**
+     * Medido el 2026-10-30: ~2 s después de colocarla, DiPlay/HyperOS regresan la ventana a su tamaño de fábrica
+     * (402,0–1482,1619) y el vigilante (cada 3 s) tardaba en corregirla: CarPlay "brincaba" al cambiar de pestaña.
+     * Ahora se revisa seguido justo después de colocarla y, si se movió, se regresa al instante con un solo comando.
+     */
+    private suspend fun asentar(esperado: IntArray) {
+        for (espera in longArrayOf(250, 500, 900, 1_500)) {
+            delay(espera)
+            if (!deseado.value) return
+            val t = tarea.takeIf { it >= 0 } ?: return
+            if (!quedoBien(esperado)) {
+                log("se movió al asentarse (tras $espera ms): se regresa ya")
+                Root.ejecutarCada(listOf(ProtocoloCarPlay.cmdRedimensionar(t, esperado)))
+            }
+        }
     }
 
     private suspend fun aplicarEscondida(ctx: Context) {

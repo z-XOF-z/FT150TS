@@ -64,7 +64,10 @@ object ZonaWifi {
             val estado = leer()
             if (estado == true) { log("switch abierto: la zona ya estaba prendida"); return@launch }
             val r = Root.ayudante("zona-on")
-            if (r == "OK") { laPrendiYo = true; prendida.value = true; log("switch abierto: zona prendida") }
+            if (r == "OK") {
+                laPrendiYo = true; prendida.value = true; log("switch abierto: zona prendida")
+                CarPlayPestana.reiniciarTrasZona()   // si DiPlay ya había arrancado sin zona, no conecta solo
+            }
             else log("no pude prender la zona: $r")
         }
     }

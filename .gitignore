@@ -28,3 +28,15 @@ Thumbs.db
 
 # Arduino / ESP32
 firmware/**/build/
+
+# Clave del llavero TamaXOF (nunca a GitHub; la genera llavero/generar_secreto.py)
+**/secreto_tamaxof.h
+# Respaldos de la NVS de la placa (odometro, Telegram, claves)
+releases/respaldo_nvs_*.bin
+
+# Llavero TamaXOF: la clave secreta NUNCA se sube (la genera llavero/generar_secreto.py)
+**/secreto_tamaxof.h
+# Respaldos de la NVS de la placa y archivos temporales
+releases/respaldo_nvs_*.bin
+*.bak
+__pycache__/

@@ -77,6 +77,9 @@
 #endif
 
 #define USAR_IGNICION 1    // 1 = hay cable de ignición (llave) conectado al ESP32
+#define USAR_LLAVERO  USAR_WIFI   // llavero TamaXOF por ESP-NOW (llavero/): llave sin contraseña y botón de paro
+#define USAR_PLACA_E  1    // 1 = busca la placa E (PCF8574 0x20) sola cada 5 s: si no está, no pasa nada y la app no
+                           //     la muestra. 0 = ni la busca (el bus I2C queda solo para LCD, reloj y MPU)
 
 // Corte de chispa (limitador de RPM, launch control y quickshifter). Pon 1 SOLO cuando ya
 // tengas armado el corte de chispa (placa base v2.1: PC817 + IRF840; ver firmware/HARDWARE-CORTE-CHISPA.md)
@@ -114,7 +117,11 @@
   #include <BLESecurity.h>
 #endif
 
-#define FW_VERSION "v1.6"
+#if USAR_LLAVERO
+  #include "tamaxof_moto.h"        // copia de llavero/moto (la pone llavero/generar_secreto.py junto con la clave)
+#endif
+
+#define FW_VERSION "v1.8"
 
 // ================================================================
 // 1) TAMAÑOS Y TIPOS
@@ -184,6 +191,8 @@ void semanaSumarViaje(float km, float litros, float vmax);
 void irADormir(bool porTimer);
 String palabra(const String& s, int n);
 bool tgListo();
+float iaAceiteFraccion();               // IA del motor (21i)
+int iaEmbraguePuntos(String& consejo);
 
 enum Icono : uint8_t { ICO_BAT = 1, ICO_GAS, ICO_TEMP, ICO_ALERTA, ICO_BT, ICO_LLAVE, ICO_GPS };
 
@@ -580,6 +589,7 @@ bool g_frenoAntes = false;
 uint32_t g_frenadas = 0;                         // veces que se pisó el freno desde que prendió la tarjeta
 uint32_t g_frenoUltimo = 0;                      // última vez que se vio la luz de freno
 bool g_rele2 = false, g_rele3 = false, g_salida = false;
+bool g_modoSeguro = false;        // guardián (21h): 3 reinicios por falla seguidos
 uint32_t g_rele2Hasta = 0, g_rele3Hasta = 0, g_salidaHasta = 0;  // apagado automático (0 = sin tiempo)
 bool g_cargando = false;
 // Luz que manda el teléfono (sin LDR): 0-100, -1 = nada reciente
@@ -1691,8 +1701,9 @@ void pistaReset() {
 // 21) CORTE DE MOTOR (relevador)
 // ================================================================
 extern bool g_llaveCerrada;
+bool g_paroLlavero = false;   // botón de paro del llavero TamaXOF: solo en RAM, se quita con "Permitir" o al quitar la llave
 void releAplicar() {
-  bool cortar = P.corteActivo || g_corteCaida || g_llaveCerrada;   // llave de proximidad: hasta que llegue tu teléfono
+  bool cortar = P.corteActivo || g_corteCaida || g_llaveCerrada || g_paroLlavero;   // llave de proximidad: hasta que llegue tu teléfono o tu llavero
   digitalWrite(PIN_RELE, (cortar == RELE_ACTIVO_ALTO) ? HIGH : LOW);
 }
 
@@ -1966,6 +1977,7 @@ void entradasActualizar(uint32_t dt) {
     if (funciones[i] == ENT_FRENO && voltaje) freno = true;
     if (funciones[i] == ENT_DIRECCIONAL && voltaje) g_dirUltPulso = ms;
   }
+  placaEEntradas(freno, ms);             // entradas de la placa E con función de freno o direccional
   if (g_modoDemo) return;                // el demo pone sus propios valores
   datos.freno = freno;
   if (freno) g_frenoUltimo = ms;
@@ -2347,6 +2359,7 @@ uint32_t g_bacheUlt = 0;
 uint16_t g_bachesHoy = 0;
 
 void bachesRevisar() {
+  if (g_modoSeguro) return;
   float nr = sqrtf(P.imuRef[0] * P.imuRef[0] + P.imuRef[1] * P.imuRef[1] + P.imuRef[2] * P.imuRef[2]);
   if (nr < 0.5f) return;
   float vert = (g_acc[0] * P.imuRef[0] + g_acc[1] * P.imuRef[1] + g_acc[2] * P.imuRef[2]) / nr - nr;   // g extra hacia arriba/abajo
@@ -2406,17 +2419,22 @@ uint8_t saludCalcular(ItemSalud* it) {
   fr = mantFraccion(4);
   it[3] = {"Frenos", constrain(100 - (int)(70 * min(fr, 1.0f)), 0, 100), fr >= 1 ? String("Ya toca revisar balatas.") : fr > 0.7f ? String("Pronto toca revisarlas.") : String("Bien.")};
   // Motor: aceite, temperatura y ralentí
-  fr = mantFraccion(1);
+  float frKm = mantFraccion(1), frEf = iaAceiteFraccion();        // km del odómetro vs km efectivos (uso pesado)
+  fr = max(frKm, frEf);
   p = 100 - (int)(50 * min(fr, 1.0f)); c = fr >= 1 ? "Ya toca cambio de aceite." : fr > 0.7f ? "Pronto toca cambio de aceite." : "Bien.";
+  if (fr > 0.7f && frEf > frKm + 0.1f) c += " (lo has exigido: muchas RPM, calor o viajes cortos)";
   if (!isnan(datos.tempC) && datos.tempC > TEMP_MAX_C) { p -= 40; c = "Se está calentando de más (" + String((int)datos.tempC) + " °C)."; }
   if (mantFraccion(2) >= 1) { p -= 10; if (c == "Bien.") c = "Ya toca cambiar el filtro."; }
   it[4] = {"Motor", constrain(p, 0, 100), c};
-  return 5;
+  // Embrague: IA del motor (21i)
+  p = iaEmbraguePuntos(c);
+  it[5] = {"Embrague", p, c};
+  return 6;
 }
 
 //  salud      estado de los componentes en JSON (la app y Telegram)
 void saludJson(Print& out) {
-  ItemSalud it[5];
+  ItemSalud it[6];
   uint8_t n = saludCalcular(it);
   out.print(F("{\"salud\":["));
   for (uint8_t i = 0; i < n; i++) {
@@ -2447,17 +2465,130 @@ void llaveCargar() {
 void llaveGuardar() { Preferences s; s.begin("llave", false); s.putBytes("l", &g_llave, sizeof g_llave); s.end(); }
 
 bool telefonoCerca();   // en la parte del Bluetooth (29b): un teléfono vinculado conectado y cifrado
+bool llaveroPresente();  // llavero TamaXOF con la clave, hace menos de 15 s (sección del llavero, abajo)
+void llaveroCambiar(bool on);
+extern bool g_llaveroOn;
 
 void llaveTick() {
   static bool ignAntes = false;
   bool ign = datos.ignicion;
+  if (!ign && g_paroLlavero) { g_paroLlavero = false; releAplicar(); }   // el paro dura hasta quitar la llave
   if (!g_llave.activa || g_modoDemo) { g_llaveCerrada = false; ignAntes = ign; return; }
   float v = isnan(datos.vel) ? 0 : datos.vel;
-  if (ign && !ignAntes && v < VEL_MAX_CORTE && !telefonoCerca()) { g_llaveCerrada = true; g_llaveIdx = 0; }
+  bool tuyo = telefonoCerca() || llaveroPresente();
+  if (ign && !ignAntes && v < VEL_MAX_CORTE && !tuyo) { g_llaveCerrada = true; g_llaveIdx = 0; }
   if (!ign) g_llaveCerrada = false;
-  if (g_llaveCerrada && telefonoCerca()) { g_llaveCerrada = false; aviso("Telefono OK"); }
+  if (g_llaveCerrada && tuyo) { g_llaveCerrada = false; aviso(telefonoCerca() ? "Telefono OK" : "Llavero OK"); }
   ignAntes = ign;
 }
+
+// --- Llavero TamaXOF (ESP-NOW cifrado, ver llavero/LEEME.md). PRENDIDO de fábrica; "llave llavero off" lo apaga.
+// Mientras la tarjeta está despierta el WiFi se queda en STA (sin conectarse a nada) para poder oír al llavero.
+// Órdenes: presencia (libera la llave de proximidad), bloquear (como /bloquear: solo parada), apagar (botón de
+// paro: corta aunque vayas rodando, porque lo pides tú manteniendo OK 2 s; dura hasta "permitir" o quitar la
+// llave), permitir (quita paro y bloqueo) y buscar (sirena 5 s si configuraste una en la alarma).
+bool g_llaveroOn = true;
+
+void llaveroCargar() { Preferences s; s.begin("llave", true); g_llaveroOn = s.getBool("tx", true); s.end(); }
+
+#if USAR_LLAVERO
+bool llaveroPresente() { return g_llaveroOn && llaveroCerca(); }
+
+void llaveroCambiar(bool on) {
+  g_llaveroOn = on;
+  Preferences s; s.begin("llave", false); s.putBool("tx", on); s.end();
+  if (on) txMotoIniciar(); else txMotoParar();
+}
+
+// Apaga el WiFi "de verdad" solo si el llavero no lo necesita; si no, nada más se desconecta y se queda en STA.
+void wifiSoltar() {
+  if (g_llaveroOn) { WiFi.disconnect(false); if (WiFi.getMode() == WIFI_OFF) WiFi.mode(WIFI_STA); }
+  else WiFi.mode(WIFI_OFF);
+}
+
+bool txMotoEjecutar(uint8_t orden) {
+  TextoPrint tp;
+  switch (orden) {
+    case OR_PRESENCIA:
+      if (g_llaveCerrada) { g_llaveCerrada = false; g_llaveIdx = 0; aviso("Llavero OK"); releAplicar(); }
+      return true;
+    case OR_BLOQUEAR:
+      return corteCambiar(true, tp);                     // igual que /bloquear: se niega rodando
+    case OR_APAGAR:
+      if (g_modoDemo) return false;
+      g_paroLlavero = true;
+      releAplicar();
+      registrarEvento(EVT_CORTE, 2);
+      aviso("PARO (llavero)");
+      return true;
+    case OR_PERMITIR:
+      g_paroLlavero = false;
+      if (g_llaveCerrada) { g_llaveCerrada = false; g_llaveIdx = 0; }
+      if (P.corteActivo || g_corteCaida) corteCambiar(false, tp); else releAplicar();
+      aviso("Motor libre (llavero)");
+      return true;
+    case OR_BUSCAR:
+      if (!g_alarma.sirena) return false;
+      g_sirenaHasta = millis() + 5000;
+      return true;
+    case OR_PRESTAR:                                     // "prestar moto": arranca con la pura llave
+      g_llave.activa = false;
+      g_llaveCerrada = false;
+      llaveGuardar();
+      releAplicar();
+      aviso("Moto prestada");
+      return true;
+    case OR_DEVOLVER:                                    // vuelve la llave de proximidad
+      g_llave.activa = true;
+      llaveGuardar();
+      aviso("Llave prox. ON");
+      return true;
+  }
+  return false;
+}
+
+bool construirAlerta(char* txt, size_t n, Icono& icono);   // sección 22
+
+// Telemetría para la pantalla "Tablero" del llavero (4 veces por segundo mientras la tiene abierta)
+void txMotoTele(TxTele& t) {
+  TxEstado e = {};
+  txMotoLlenar(e);
+  t.flags = e.flags;
+  t.vel = e.vel;
+  t.gas = e.gas;
+  t.vMoto_cV = e.vMoto_cV;
+  t.km10 = e.km10;
+  t.epoch = e.epoch;
+  t.rpm = datos.rpm < 0 ? -1 : (int16_t)min(datos.rpm, 30000);
+  t.marcha = datos.neutral ? 0 : (int8_t)datos.marcha;
+  t.temp10 = isnan(datos.tempC) ? INT16_MIN : (int16_t)lroundf(datos.tempC * 10);
+  char txt[sizeof t.alerta];
+  Icono ic;
+  if (construirAlerta(txt, sizeof txt, ic)) {
+    t.tipoAlerta = ic == ICO_BT ? TA_TEL : TA_MOTO;
+    memcpy(t.alerta, txt, sizeof t.alerta);
+    t.alerta[sizeof t.alerta - 1] = 0;
+  }
+}
+
+void txMotoLlenar(TxEstado& e) {
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  e.flags = 0;
+  if (P.corteActivo || g_corteCaida || g_llaveCerrada) e.flags |= EF_BLOQ;
+  if (g_paroLlavero) e.flags |= EF_APAGADO;
+  if (datos.ignicion) e.flags |= EF_IGN;
+  if (v > VEL_MAX_CORTE) e.flags |= EF_RODANDO;
+  if (g_llave.activa) e.flags |= EF_LLAVE;
+  e.vMoto_cV = isnan(datos.vMoto) ? -1 : (int16_t)lroundf(datos.vMoto * 100);
+  e.gas = datos.gasPct < 0 ? -1 : (int8_t)constrain(datos.gasPct, 0, 100);
+  e.vel = (uint8_t)constrain((int)lroundf(v), 0, 255);
+  e.km10 = (uint32_t)(P.odometro * 10);
+  e.epoch = g_rtcOk ? ahoraEpoch() : 0;
+}
+#else
+bool llaveroPresente() { return false; }
+void llaveroCambiar(bool on) { g_llaveroOn = on; }
+#endif
 
 bool llaveBoton(uint8_t ev) {
   if (!g_llaveCerrada) return false;
@@ -2472,6 +2603,7 @@ bool llaveBoton(uint8_t ev) {
 void llaveComando(const String& low, Print& out) {
   String c1 = palabra(low, 1), c2 = palabra(low, 2);
   if (c1 == "on" || c1 == "off") { g_llave.activa = c1 == "on"; if (!g_llave.activa) g_llaveCerrada = false; llaveGuardar(); }
+  else if (c1 == "llavero" && (c2 == "on" || c2 == "off")) { llaveroCambiar(c2 == "on"); }
   else if (c1 == "codigo") {
     if (c2.length() != 4) { out.println(F("Usa: llave codigo aabo (a arriba, b abajo, o OK)")); return; }
     for (uint8_t i = 0; i < 4; i++) {
@@ -2481,7 +2613,8 @@ void llaveComando(const String& low, Print& out) {
     }
     llaveGuardar();
   }
-  out.printf("{\"ll\":%d,\"lc\":%d,\"tel\":%d}\n", g_llave.activa ? 1 : 0, g_llaveCerrada ? 1 : 0, telefonoCerca() ? 1 : 0);
+  out.printf("{\"ll\":%d,\"lc\":%d,\"tel\":%d,\"tx\":%d,\"txc\":%d,\"paro\":%d}\n", g_llave.activa ? 1 : 0,
+             g_llaveCerrada ? 1 : 0, telefonoCerca() ? 1 : 0, g_llaveroOn ? 1 : 0, llaveroPresente() ? 1 : 0, g_paroLlavero ? 1 : 0);
 }
 
 // --- Resumen semanal (Telegram, el lunes): km, viajes, gasolina, velocidad máxima y baches
@@ -2520,6 +2653,494 @@ String semanaTexto() {
 }
 
 // ================================================================
+// 21g) PLACA E: EXPANSIÓN I2C (PCF8574 en 0x20)
+// ================================================================
+// P0 = relevador 1 (BOMBA), P1/P2 = relevadores 2 y 3, P3 = salida aislada, P4..P7 = entradas 1..4. Todo activo en 0.
+// Las entradas se leen solo si su bit está en 1 (el PCF solo jala a tierra), así que siempre se escriben en 1.
+// La INT del PCF no llega a la placa B: se lee cada 100 ms. Sin la placa E todo sigue igual (se busca cada 5 s).
+// Al arrancar y antes de dormir se escribe 0xFF: si la tarjeta se reinicia con la BOMBA prendida, se apaga en < 1 s.
+const uint8_t  E_DIR             = 0x20;
+const uint16_t E_BOMBA_MAX_S     = 600;    // tope de una inflada (10 min): casi todos los infladores piden descanso
+const uint16_t E_BOMBA_DESCANSO_S = 300;   // después de llegar al tope, 5 min sin poder prenderla
+const float    E_BOMBA_ARRANQUE_V = 11.8f; // motor apagado y batería abajo de esto: no arranca (prende el motor)
+const float    E_BOMBA_CORTE_V   = 10.5f;  // inflando, si la batería cae abajo de esto 2 s: se apaga (batería o motor trabado)
+// Qué hay en las 4 entradas de la placa E (las mismas opciones que ENT2/ENT3 de la placa B)
+const FuncionEntrada FUNCION_E[4] = {ENT_LIBRE, ENT_LIBRE, ENT_LIBRE, ENT_LIBRE};
+
+bool g_eHay = false;              // la placa E contesta
+uint8_t g_eFallas = 0;            // errores I2C seguidos
+uint8_t g_eSal = 0;               // bit 0 BOMBA, 1 relevador 2, 2 relevador 3, 3 salida (1 = prendido)
+uint32_t g_eHasta[4] = {0, 0, 0, 0};
+uint8_t g_eEnt = 0;               // bits 0..3: 1 = la entrada tiene voltaje
+uint8_t g_eCorto = 0;             // salidas que se leen al revés (pista en corto o PCF dañado)
+uint32_t g_eBombaDesde = 0, g_eDescansoHasta = 0, g_eBajoDesde = 0, g_eBuscar = 0;
+String g_eMotivo = "";            // por qué se apagó la BOMBA la última vez
+
+void guardianError(uint8_t cod, const String& texto);
+extern uint32_t g_reiniciarEn;     // "reiniciar" (sección 28): el guardián la usa para reiniciar ordenadamente
+const uint8_t ERR_PLACA_E = 10, ERR_BOMBA = 11, ERR_E_CORTO = 12;
+
+bool pcfEscribir(uint8_t v) { Wire.beginTransmission(E_DIR); Wire.write(v); return Wire.endTransmission() == 0; }
+int pcfLeer() { if (Wire.requestFrom(E_DIR, (uint8_t)1) != 1) return -1; return Wire.read(); }
+uint8_t eByte() { return (uint8_t)(0xF0 | (~g_eSal & 0x0F)); }   // salidas activas en 0, entradas en 1
+
+void placaEBegin() {
+  g_eSal = 0;
+#if !USAR_PLACA_E
+  return;
+#endif
+  g_eHay = pcfEscribir(0xFF);
+  Serial.printf("Placa E (0x%02X): %s\n", E_DIR, g_eHay ? "si" : "no esta");
+}
+
+/** Todo apagado (antes de dormir o si algo falla). */
+void placaEApagar() {
+  g_eSal = 0;
+  for (uint8_t i = 0; i < 4; i++) g_eHasta[i] = 0;
+  if (g_eHay) pcfEscribir(0xFF);
+}
+
+void eBombaParar(const String& motivo) {
+  if (!(g_eSal & 1)) return;
+  g_eSal &= ~1;
+  g_eHasta[0] = 0;
+  g_eMotivo = motivo;
+  Serial.println("BOMBA apagada: " + motivo);
+}
+
+void placaETick() {
+#if !USAR_PLACA_E
+  return;
+#endif
+  uint32_t ms = millis();
+  if (!g_eHay) {
+    if (ms - g_eBuscar < 5000) return;
+    g_eBuscar = ms;
+    if (!pcfEscribir(0xFF)) return;
+    g_eHay = true; g_eFallas = 0; g_eSal = 0;
+    Serial.println(F("Placa E conectada"));
+  }
+  for (uint8_t i = 0; i < 4; i++)
+    if (g_eHasta[i] && (int32_t)(ms - g_eHasta[i]) >= 0) {
+      if (i == 0) eBombaParar("terminó el tiempo");
+      else g_eSal &= ~(1 << i);
+      g_eHasta[i] = 0;
+    }
+  // BOMBA: tope de tiempo, batería y moto en movimiento
+  if (g_eSal & 1) {
+    float v = datos.vMoto, vel = isnan(datos.vel) ? 0 : datos.vel;
+    if (ms - g_eBombaDesde > E_BOMBA_MAX_S * 1000UL) {
+      eBombaParar("llegó al tope de " + String(E_BOMBA_MAX_S / 60) + " min (descansa " + String(E_BOMBA_DESCANSO_S / 60) + " min)");
+      g_eDescansoHasta = ms + E_BOMBA_DESCANSO_S * 1000UL;
+    } else if (vel > 5) eBombaParar("la moto empezó a moverse");
+    else if (!isnan(v) && v > 5 && v < E_BOMBA_CORTE_V) {
+      if (!g_eBajoDesde) g_eBajoDesde = ms;
+      else if (ms - g_eBajoDesde > 2000) {
+        eBombaParar("la batería cayó a " + String(v, 1) + " V");
+        guardianError(ERR_BOMBA, "La BOMBA se apagó sola: la batería cayó a " + String(v, 1) + " V (batería débil o el motor de la bomba se trabó)");
+      }
+    } else g_eBajoDesde = 0;
+  } else g_eBajoDesde = 0;
+
+  uint8_t b = eByte();
+  int r = pcfEscribir(b) ? pcfLeer() : -1;
+  if (r < 0) {
+    if (++g_eFallas >= 3) {
+      g_eHay = false;
+      bool habia = g_eSal != 0;
+      g_eSal = 0;
+      guardianError(ERR_PLACA_E, habia ? "La placa E dejó de contestar con algo prendido: revisa el cable I2C (sus relevadores pueden quedarse como estaban)"
+                                       : "La placa E dejó de contestar: revisa el cable I2C");
+    }
+    return;
+  }
+  g_eFallas = 0;
+  // Una salida apagada (1) que se lee en 0 = algo la jala a tierra: corto. Se apaga y se avisa una vez.
+  uint8_t corto = (uint8_t)(b & ~r & 0x0F);
+  if (corto && corto != g_eCorto) guardianError(ERR_E_CORTO, "Placa E: la salida P" + String(__builtin_ctz(corto)) + " se lee al revés (corto en la pista o el PCF8574 dañado)");
+  g_eCorto = corto;
+  g_eEnt = (uint8_t)((~r >> 4) & 0x0F);
+}
+
+/** Entradas de la placa E con función de freno o direccional (las lee entradasActualizar). */
+void placaEEntradas(bool& freno, uint32_t ms) {
+  if (!g_eHay) return;
+  for (uint8_t i = 0; i < 4; i++) {
+    if (!(g_eEnt & (1 << i))) continue;
+    if (FUNCION_E[i] == ENT_FRENO) freno = true;
+    if (FUNCION_E[i] == ENT_DIRECCIONAL) g_dirUltPulso = ms;
+  }
+}
+
+void placaEJson(Print& out) {
+  uint32_t ms = millis();
+  long resta = (g_eSal & 1) && g_eHasta[0] ? (long)(g_eHasta[0] - ms) / 1000 : -1;
+  long descanso = g_eDescansoHasta && (int32_t)(g_eDescansoHasta - ms) > 0 ? (long)(g_eDescansoHasta - ms) / 1000 : 0;
+  char mot[64];
+  textoSeguro(mot, sizeof mot, g_eMotivo.c_str());
+  out.printf("{\"e\":{\"hay\":%d,\"s\":[%d,%d,%d,%d],\"in\":[%d,%d,%d,%d],\"bt\":%ld,\"des\":%ld,\"corto\":%u,\"mot\":\"%s\"}}\n",
+             g_eHay, g_eSal & 1, (g_eSal >> 1) & 1, (g_eSal >> 2) & 1, (g_eSal >> 3) & 1,
+             g_eEnt & 1, (g_eEnt >> 1) & 1, (g_eEnt >> 2) & 1, (g_eEnt >> 3) & 1, resta, descanso, g_eCorto, mot);
+}
+
+//  e                                   estado de la placa E
+//  e bomba on [segundos] | off         BOMBA (de fábrica 3 min; tope 10 min)
+//  e 2|3|s on [segundos] | off         relevadores 2 y 3 de la placa E y su salida aislada
+void placaEComando(const String& low, Print& out) {
+  String c1 = palabra(low, 1), c2 = palabra(low, 2);
+  if (c1 == "") { placaEJson(out); return; }
+  if (!g_eHay) { out.println(F("La placa E no contesta (revisa el cable I2C y que su dirección sea 0x20).")); return; }
+  int8_t i = c1 == "bomba" || c1 == "1" ? 0 : c1 == "2" ? 1 : c1 == "3" ? 2 : (c1 == "s" || c1 == "salida") ? 3 : -1;
+  if (i < 0 || (c2 != "on" && c2 != "off")) { out.println(F("Usa: e bomba|2|3|s on [segundos] | off")); return; }
+  uint32_t ms = millis();
+  if (c2 == "off") {
+    if (i == 0) eBombaParar("la apagaste");
+    else { g_eSal &= ~(1 << i); g_eHasta[i] = 0; }
+  } else {
+    uint32_t s = (uint32_t)palabra(low, 3).toInt();
+    if (i == 0) {
+      float v = datos.vMoto, vel = isnan(datos.vel) ? 0 : datos.vel;
+      if (g_eDescansoHasta && (int32_t)(g_eDescansoHasta - ms) > 0) { out.printf("La BOMBA descansa %ld s más.\n", (long)(g_eDescansoHasta - ms) / 1000); return; }
+      if (vel > 3) { out.println(F("Con la moto en movimiento no.")); return; }
+      if (!g_motorEnc && !isnan(v) && v > 5 && v < E_BOMBA_ARRANQUE_V) {
+        out.printf("Batería a %.1f V: prende el motor para inflar.\n", v); return;
+      }
+      s = constrain(s ? s : 180, (uint32_t)5, (uint32_t)E_BOMBA_MAX_S);
+      if (!(g_eSal & 1)) g_eBombaDesde = ms;
+      g_eMotivo = "";
+    } else if (s) s = min(s, (uint32_t)86400);
+    g_eSal |= (1 << i);
+    g_eHasta[i] = s ? ms + s * 1000UL : 0;
+  }
+  placaETick();
+  placaEJson(out);
+}
+
+// ================================================================
+// 21h) GUARDIÁN: detecta fallas, se protege y te avisa
+// ================================================================
+// - Vigilante (watchdog): si loop() se traba 30 s, la tarjeta se reinicia sola en vez de quedarse congelada.
+// - Al arrancar revisa por qué se reinició (falla, vigilante, bajón de voltaje) y lo anota.
+// - 3 fallas seguidas en menos de 5 min = MODO SEGURO: apaga lo que no es indispensable (IA de vibraciones,
+//   baches, LEDs) para que el tablero, el Bluetooth, la OTA y el WiFi sigan y la puedas arreglar.
+// - Temperatura del chip > 80 °C: baja el procesador a 80 MHz hasta que baje de 65 °C.
+// - Memoria libre muy baja: avisa y, estacionada, se reinicia ordenadamente antes de que truene.
+// - Componentes que fallan (reloj, MPU, SD, temperatura, LCD), el regulador de la moto y la placa E.
+// Todo queda en una bitácora de 12 renglones (NVS) y lo nuevo se manda por Telegram la próxima vez que haya WiFi
+// de casa (y a la app por Bluetooth como evento "w"). Consola: "errores" / "errores borrar"; Telegram: /errores.
+#include <esp_task_wdt.h>
+const uint32_t GUARDIA_WDT_MS = 30000;
+const uint8_t  N_ERRORES = 12;
+const uint8_t  ERR_REINICIO = 1, ERR_MODO_SEGURO = 2, ERR_TEMP_CHIP = 3, ERR_MEMORIA = 4, ERR_COMPONENTE = 20, ERR_REGULADOR = 6, ERR_EMBRAGUE = 7;   // componentes: 20 + cuál (0..4)
+struct RegError { uint32_t t; uint8_t cod; uint8_t enviado; char txt[110]; };
+struct Bitacora { uint32_t magic; uint8_t idx; RegError r[N_ERRORES]; uint8_t compOk; };
+const uint32_t MAGIC_BITACORA = 0xF150E44B;
+Bitacora g_bit;
+bool g_bitSucia = false;
+RTC_DATA_ATTR uint8_t g_fallasSeguidas = 0;
+bool g_chipLento = false;
+uint32_t g_guardiaDesde = 0;
+uint8_t g_cargaAntes = 0;
+
+void bitacoraCargar() {
+  Preferences s;
+  s.begin("guardian", true);
+  bool ok = s.getBytesLength("b") == sizeof(Bitacora) && s.getBytes("b", &g_bit, sizeof(Bitacora)) == sizeof(Bitacora) &&
+            g_bit.magic == MAGIC_BITACORA;
+  s.end();
+  if (!ok) { memset(&g_bit, 0, sizeof g_bit); g_bit.magic = MAGIC_BITACORA; g_bit.compOk = 0; }   // 0: lo que nunca estuvo no se reporta
+}
+
+void bitacoraGuardar() {
+  if (!g_bitSucia) return;
+  Preferences s;
+  s.begin("guardian", false);
+  s.putBytes("b", &g_bit, sizeof g_bit);
+  s.end();
+  g_bitSucia = false;
+}
+
+/** Anota una falla (si la misma ya se anotó en la última hora, no se repite) y avisa. */
+void guardianError(uint8_t cod, const String& texto) {
+  // Freno en RAM (aunque no haya reloj): la misma clase de falla máximo una vez cada 10 min. Así un cable que hace
+  // falso contacto no escribe la flash cada 5 s.
+  static uint32_t ultimaVez[32] = {0};
+  uint32_t ms = millis();
+  if (cod < 32 && ultimaVez[cod] && ms - ultimaVez[cod] < 600000UL) return;
+  if (cod < 32) ultimaVez[cod] = ms ? ms : 1;
+  uint32_t t = g_rtcOk ? ahoraEpoch() : 0;
+  for (uint8_t i = 0; i < N_ERRORES; i++) {
+    const RegError& e = g_bit.r[i];
+    if (e.cod == cod && t && e.t && t - e.t < 3600 && texto.startsWith(String(e.txt).substring(0, 20))) return;
+  }
+  RegError& e = g_bit.r[g_bit.idx];
+  g_bit.idx = (g_bit.idx + 1) % N_ERRORES;
+  e.t = t; e.cod = cod; e.enviado = 0;
+  cortarUtf8(e.txt, sizeof e.txt, texto.c_str());
+  g_bitSucia = true;
+  bitacoraGuardar();
+  Serial.println("[GUARDIAN] " + texto);
+  char ev[48];
+  snprintf(ev, sizeof ev, "{\"k\":\"w\",\"c\":%u}", cod);
+  bleEvento(ev);
+}
+
+const char* motivoReinicio(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_PANIC: return "una falla del programa (panic)";
+    case ESP_RST_INT_WDT: case ESP_RST_TASK_WDT: case ESP_RST_WDT: return "el vigilante (el programa se trabó)";
+    case ESP_RST_BROWNOUT: return "un bajón de voltaje (revisa la alimentación de 5 V y la celda)";
+    default: return nullptr;
+  }
+}
+
+/** Al arrancar (después de nvsCargar y del reloj). */
+void guardianBegin() {
+  bitacoraCargar();
+  esp_reset_reason_t r = esp_reset_reason();
+  const char* m = motivoReinicio(r);
+  if (m) {
+    if (g_fallasSeguidas < 255) g_fallasSeguidas++;
+    guardianError(ERR_REINICIO, String("La tarjeta se reinició por ") + m + ".");
+  } else if (r == ESP_RST_POWERON) g_fallasSeguidas = 0;
+  if (g_fallasSeguidas >= 3) {
+    g_modoSeguro = true;
+    guardianError(ERR_MODO_SEGURO, "MODO SEGURO: 3 reinicios por falla seguidos. Apagué la IA de vibraciones, los baches y los LEDs. "
+                                   "El tablero, Bluetooth, OTA y WiFi siguen. Manda 'errores' o actualiza el firmware.");
+  }
+}
+
+/** Al terminar setup(): el vigilante empieza a cuidar loop(). */
+void guardianVigilar() {
+  esp_task_wdt_config_t c = {};
+  c.timeout_ms = GUARDIA_WDT_MS;
+  c.idle_core_mask = 1;                 // también cuida que el núcleo 0 no se quede sin respirar
+  c.trigger_panic = true;
+  if (esp_task_wdt_reconfigure(&c) != ESP_OK) esp_task_wdt_init(&c);
+  enableLoopWDT();
+  g_guardiaDesde = millis();
+}
+
+/** Cada minuto. */
+void guardianTick() {
+  uint32_t ms = millis();
+  // 5 min sin reiniciarse: se olvida la racha (el modo seguro sigue hasta el siguiente arranque)
+  if (g_fallasSeguidas && ms - g_guardiaDesde > 300000) g_fallasSeguidas = 0;
+  // Temperatura del chip
+  float tc = temperatureRead();
+  if (!g_chipLento && tc > 80) {
+    setCpuFrequencyMhz(80); g_chipLento = true;
+    guardianError(ERR_TEMP_CHIP, "El chip está a " + String(tc, 0) + " °C: bajé el procesador a 80 MHz. Revisa que la caja ventile y no le dé el sol directo.");
+  } else if (g_chipLento && tc < 65) { setCpuFrequencyMhz(240); g_chipLento = false; }
+  // Memoria
+  uint32_t libre = ESP.getFreeHeap();
+  if (libre < 25000) guardianError(ERR_MEMORIA, "Memoria libre baja: " + String(libre / 1024) + " KB.");
+  float vel = isnan(datos.vel) ? 0 : datos.vel;
+  if (libre < 12000 && !g_motorEnc && vel < 1 && !g_otaActivo) {
+    guardianError(ERR_MEMORIA, "Me reinicié para liberar memoria (" + String(libre / 1024) + " KB libres).");
+    nvsGuardar();
+    g_reiniciarEn = millis() + 500;
+  }
+  // Regulador / alternador
+  if (g_estadoCarga != g_cargaAntes && (g_estadoCarga == 2 || g_estadoCarga == 3))
+    guardianError(ERR_REGULADOR, g_estadoCarga == 2 ? "El alternador no está cargando la batería (" + String(datos.vMoto, 1) + " V con el motor prendido): revisa el regulador y el fusible."
+                                                    : "Sobrecarga: la batería recibe " + String(datos.vMoto, 1) + " V. El regulador está fallando y puede dañar la batería y los focos.");
+  g_cargaAntes = g_estadoCarga;
+  bitacoraGuardar();
+}
+
+/** Componentes: avisa cuando uno que funcionaba deja de hacerlo (no cada arranque). Se llama tras el diagnóstico. */
+void guardianComponentes() {
+  const bool ok[5] = {g_rtcOk, g_imuOk, g_sdOk, g_tempOk, g_lcdOk};
+  const char* nombre[5] = {"el reloj DS3231", "el MPU6050", "la tarjeta SD", "el sensor de temperatura", "la pantalla LCD"};
+  uint8_t mask = 0;
+  for (uint8_t i = 0; i < 5; i++) if (ok[i]) mask |= 1 << i;
+  for (uint8_t i = 0; i < 5; i++)
+    if ((g_bit.compOk & (1 << i)) && !ok[i]) guardianError(ERR_COMPONENTE + i, String("Dejó de responder ") + nombre[i] + ": revisa su cable o conector.");
+  if (g_bit.compOk != mask) { g_bit.compOk = mask; g_bitSucia = true; bitacoraGuardar(); }
+}
+
+String fechaCorta(uint32_t t) {
+  if (!t) return "--";
+  DateTime d(t);                       // el reloj guarda la hora local
+  char b[16];
+  snprintf(b, sizeof b, "%02d/%02d %02d:%02d", d.day(), d.month(), d.hour(), d.minute());
+  return b;
+}
+
+String erroresTexto(bool soloNuevos) {
+  String t;
+  for (uint8_t k = 0; k < N_ERRORES; k++) {
+    const RegError& e = g_bit.r[(g_bit.idx + k) % N_ERRORES];
+    if (!e.cod || (soloNuevos && e.enviado)) continue;
+    t += "• " + fechaCorta(e.t) + " " + e.txt + "\n";
+  }
+  return t;
+}
+
+void erroresJson(Print& out) {
+  out.printf("{\"err\":[");
+  bool primero = true;
+  for (uint8_t k = 0; k < N_ERRORES; k++) {
+    const RegError& e = g_bit.r[(g_bit.idx + k) % N_ERRORES];
+    if (!e.cod) continue;
+    char tx[120];
+    textoSeguro(tx, sizeof tx, e.txt);
+    out.printf("%s{\"t\":%lu,\"c\":%u,\"x\":\"%s\"}", primero ? "" : ",", (unsigned long)e.t, e.cod, tx);
+    primero = false;
+  }
+  out.printf("],\"seguro\":%d,\"tc\":%.0f,\"hp\":%u}\n", g_modoSeguro, temperatureRead(), (unsigned)(ESP.getFreeHeap() / 1024));
+}
+
+//  errores | errores borrar
+void erroresComando(const String& low, Print& out) {
+  if (palabra(low, 1) == "borrar") {
+    uint8_t comp = g_bit.compOk;
+    memset(&g_bit, 0, sizeof g_bit);
+    g_bit.magic = MAGIC_BITACORA; g_bit.compOk = comp;
+    g_bitSucia = true; bitacoraGuardar();
+  }
+  erroresJson(out);
+}
+
+/** Con WiFi de casa: manda por Telegram lo que no se ha mandado. */
+void guardianEnviar() {
+  if (!tgListo()) return;
+  String t = erroresTexto(true);
+  if (!t.length()) return;
+  if (!tgEnviar("🛡️ La tarjeta detectó:\n" + t)) return;
+  for (uint8_t i = 0; i < N_ERRORES; i++) g_bit.r[i].enviado = 1;
+  g_bitSucia = true;
+  bitacoraGuardar();
+}
+
+// ================================================================
+// 21i) IA DEL MOTOR: EMBRAGUE QUE PATINA Y DESGASTE REAL DEL ACEITE
+// ================================================================
+// Embrague: en cada marcha aprende cuánto se aleja de lo normal la relación RPM/velocidad a velocidad constante
+// (promedio y variación, Welford). Acelerando fuerte en 3a o más, si las RPM suben de más para la velocidad
+// (la relación se va > 4 % y > 3 desviaciones arriba de lo normal durante 1.5 s), el embrague está patinando.
+// Aceite: "km efectivos". Cada km vale más si el motor va muy revolucionado, muy caliente o frío (viajes cortos).
+// Se guarda aparte ("ia" en NVS) para no tocar la memoria principal.
+struct IaMotor {
+  uint32_t magic;
+  float embProm[NUM_MARCHAS], embM2[NUM_MARCHAS];   // desviación de la relación a velocidad constante (fracción)
+  uint32_t embN[NUM_MARCHAS];
+  uint16_t patinadas;              // veces que se detectó patinando (desde la última revisión)
+  float kmEval;                    // km acelerando fuerte en 3a+ (para saber cuántas oportunidades hubo)
+  float aceiteEf;                  // km efectivos desde el último cambio de aceite
+  float aceiteRefKm;               // odómetro del último cambio (si cambias el aceite en el menú, se reinicia)
+};
+const uint32_t MAGIC_IA = 0xF150A1E0;
+IaMotor g_ia;
+bool g_iaSucia = false;
+uint32_t g_iaGuardado = 0, g_patinaDesde = 0;
+float g_velAntes = NAN;
+uint32_t g_motorEncDesde = 0;
+
+void iaCargar() {
+  Preferences s;
+  s.begin("ia", true);
+  bool ok = s.getBytesLength("m") == sizeof(IaMotor) && s.getBytes("m", &g_ia, sizeof(IaMotor)) == sizeof(IaMotor) && g_ia.magic == MAGIC_IA;
+  s.end();
+  if (!ok) { memset(&g_ia, 0, sizeof g_ia); g_ia.magic = MAGIC_IA; g_ia.aceiteRefKm = P.mant[1].kmUltimo; }
+}
+
+void iaGuardar(bool ya) {
+  if (!g_iaSucia || (!ya && millis() - g_iaGuardado < 300000)) return;
+  Preferences s;
+  s.begin("ia", false);
+  s.putBytes("m", &g_ia, sizeof g_ia);
+  s.end();
+  g_iaSucia = false;
+  g_iaGuardado = millis();
+}
+
+/** Cuánto "desgasta" el aceite este momento (1 = normal). */
+float iaFactorAceite() {
+  float f = 1.0f;
+  if (datos.rpm > RPM_ROJO * 0.8f) f += 0.6f;                   // muy revolucionado
+  if (!isnan(datos.tempC)) {
+    if (datos.tempC > TEMP_MAX_C - 10) f += 0.5f;                // muy caliente
+    else if (datos.tempC < 50) f += 0.4f;                        // frío: el aceite aún no protege bien
+  } else if (g_motorEnc && millis() - g_motorEncDesde < 300000) f += 0.4f;   // sin sensor: los primeros 5 min
+  return f;
+}
+
+/** Cada tick (100 ms), solo con sensores reales. */
+void iaMotorTick(uint32_t dt) {
+  if (g_modoDemo || g_modoSeguro) return;
+  if (!g_motorEnc) g_motorEncDesde = millis();
+  float v = isnan(datos.vel) ? 0 : datos.vel;
+  // --- Aceite
+  if (P.mant[1].kmUltimo != g_ia.aceiteRefKm) { g_ia.aceiteRefKm = P.mant[1].kmUltimo; g_ia.aceiteEf = 0; g_iaSucia = true; }
+  if (v > 1) { g_ia.aceiteEf += v * dt / 3600000.0f * iaFactorAceite(); g_iaSucia = true; }
+  // --- Embrague
+  float a = isnan(g_velAntes) ? 0 : (v - g_velAntes) * 1000.0f / max(dt, (uint32_t)1);      // km/h por segundo
+  g_velAntes = v;
+  static float acel = 0;
+  acel = acel * 0.8f + a * 0.2f;                                 // suavizada: el sensor de velocidad brinca
+  int m = datos.marcha;
+  if (m < 1 || m > NUM_MARCHAS || v < 15 || datos.rpm < 2000) { g_patinaDesde = 0; return; }
+  float esperado = P.ratioMarcha[m - 1];
+  float d = (datos.rpm / v - esperado) / esperado;               // > 0 = más RPM de las que tocan
+  if (fabs(acel) < 0.5f) {
+    // Velocidad constante: aprende lo normal en esta marcha
+    uint8_t i = m - 1;
+    if (g_ia.embN[i] < 50000) {
+      g_ia.embN[i]++;
+      float delta = d - g_ia.embProm[i];
+      g_ia.embProm[i] += delta / g_ia.embN[i];
+      g_ia.embM2[i] += delta * (d - g_ia.embProm[i]);
+      g_iaSucia = true;
+    }
+    g_patinaDesde = 0;
+    return;
+  }
+  if (m < 3 || acel < 1.5f || datos.rpm < 4500) { g_patinaDesde = 0; return; }
+  g_ia.kmEval += v * dt / 3600000.0f;
+  uint8_t i = m - 1;
+  if (g_ia.embN[i] < 300) return;                                // todavía no conoce esta marcha (~30 s a velocidad constante)
+  float sd = sqrtf(g_ia.embM2[i] / (g_ia.embN[i] - 1));
+  bool raro = d - g_ia.embProm[i] > max(0.04f, 3 * sd);
+  if (!raro) { g_patinaDesde = 0; return; }
+  if (!g_patinaDesde) g_patinaDesde = millis();
+  else if (millis() - g_patinaDesde > 1500) {
+    g_patinaDesde = 0;
+    if (g_ia.patinadas < 60000) g_ia.patinadas++;
+    g_iaSucia = true;
+    Serial.printf("IA: el embrague patinó en %da (%.0f%% de más)\n", m, (d - g_ia.embProm[i]) * 100);
+    if (g_ia.patinadas == 3 || g_ia.patinadas == 20)
+      guardianError(ERR_EMBRAGUE, "El embrague está patinando al acelerar fuerte (" + String(g_ia.patinadas) + " veces): ajusta el juego del chicote; si sigue, revisa los discos.");
+  }
+  iaGuardar(false);
+}
+
+/** Puntos del embrague para "salud" (100 = bien). */
+int iaEmbraguePuntos(String& consejo) {
+  uint16_t n = 0;
+  for (uint8_t i = 2; i < NUM_MARCHAS; i++) if (g_ia.embN[i] >= 300) n++;
+  if (!n) { consejo = "Aprendiendo: rueda unos minutos a velocidad constante en 3a, 4a y 5a."; return 100; }
+  if (g_ia.patinadas >= 20) { consejo = "Patina seguido al acelerar: revisa los discos del embrague."; return 30; }
+  if (g_ia.patinadas >= 3) { consejo = "Patinó " + String(g_ia.patinadas) + " veces: ajusta el juego del chicote (2-3 mm)."; return 60; }
+  consejo = "Bien.";
+  return 100;
+}
+
+//  ia                 lo que lleva aprendido (JSON)
+//  ia embrague ok     ya lo revisaste/ajustaste: vuelve a contar desde cero
+void iaComando(const String& low, Print& out) {
+  if (palabra(low, 1) == "embrague" && palabra(low, 2) == "ok") { g_ia.patinadas = 0; g_ia.kmEval = 0; g_iaSucia = true; iaGuardar(true); }
+  out.printf("{\"ia\":{\"pat\":%u,\"kme\":%.1f,\"acEf\":%.0f,\"acKm\":%.0f,\"n\":[", g_ia.patinadas, g_ia.kmEval, g_ia.aceiteEf,
+             mantKmDesde(1));
+  for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%lu", i ? "," : "", (unsigned long)g_ia.embN[i]);
+  out.println("]}}");
+}
+
+/** Fracción del intervalo de aceite ya gastada según los km efectivos. */
+float iaAceiteFraccion() { return P.mant[1].intKm ? min(g_ia.aceiteEf / P.mant[1].intKm, 1.5f) : 0.0f; }
+
+// ================================================================
 // 22) ALERTAS (fila 4 de la pantalla principal)
 // ================================================================
 // Devuelve true si hay una alerta. El texto va sin ícono (para mandarlo
@@ -2530,6 +3151,7 @@ bool construirAlerta(char* txt, size_t n, Icono& icono) {
   icono = ICO_ALERTA;
 
   if (g_llaveCerrada) { snprintf(txt, n, "ACERCA TU TELEFONO"); return true; }
+  if (g_paroLlavero) { snprintf(txt, n, "PARO (LLAVERO)"); return true; }
   if (P.corteActivo || g_corteCaida) { snprintf(txt, n, "MOTOR BLOQUEADO"); return true; }
   if (g_caida) { snprintf(txt, n, "CAIDA DETECTADA"); return true; }
   if (datos.dirOlvidada) { snprintf(txt, n, "DIRECCIONAL PRENDIDA"); return true; }
@@ -2880,7 +3502,7 @@ void accionAjuste(uint8_t i) {
     case 2: P.autoBrillo = !P.autoBrillo; aviso("Brillo cambiado"); break;
     case 3: P.wifiOn = !P.wifiOn; aviso(P.wifiOn ? "WiFi al reiniciar" : "WiFi apagado");
 #if USAR_WIFI
-      if (!P.wifiOn) WiFi.mode(WIFI_OFF);
+      if (!P.wifiOn) wifiSoltar();
 #endif
       break;
     case 4: corteCambiar(!P.corteActivo, tp); aviso(P.corteActivo ? "Motor bloqueado" : "Motor libre"); break;
@@ -3671,6 +4293,9 @@ void mostrarAyuda(Print& out) {
   out.println(F(" casa cada <min> | casa prueba | casa borrar"));
   out.println(F(" ota                     estado de la actualizacion desde la app"));
   out.println(F(" rele | rele 2|3|s on [seg] | off      relevadores 2 y 3 y la salida aislada"));
+  out.println(F(" e | e bomba|2|3|s on [seg] | off     placa E: BOMBA (tope 10 min), relevadores, salida"));
+  out.println(F(" errores | errores borrar             bitacora del guardian (fallas, reinicios)"));
+  out.println(F(" ia | ia embrague ok                  IA del motor: embrague que patina y km efectivos del aceite"));
   out.println(F(" alarma | alarma on|off | sens 1-5 | sirena 0|2|3|s | prueba"));
   out.println(F(" vibra | vibra on|off | captura on|off | olvidar     IA de vibraciones"));
   out.println(F(" salud                   estado de bateria, cadena, encendido, frenos y motor"));
@@ -3713,14 +4338,14 @@ void cfgJson(Print& out) {
   out.printf("{\"fw\":\"%s\",\"up\":%lu,\"hp\":%u,\"tc\":%.1f,\"pf\":%d,\"fv\":%d,\"ab\":%d,\"wf\":%d,"
              "\"kl\":%.1f,\"bf\":%.3f,\"gv\":%.0f,\"gl\":%.0f,\"dm\":%d,\"rtc\":%d,\"imu\":%d,\"sd\":%d,\"tp\":%d,"
              "\"pm\":%.2f,\"ota\":%d,\"casa\":%d,\"r2\":%d,\"r3\":%d,\"so\":%d,\"alm\":%d,\"as\":%u,\"ar\":%u,\"aok\":%d,\"ll\":%d,"
-             "\"vb\":%d,\"vc\":%d,\"vm\":%u,\"placa\":\"B\",\"sh\":[",
+             "\"vb\":%d,\"vc\":%d,\"vm\":%u,\"pe\":%d,\"seg\":%d,\"placa\":\"B\",\"sh\":[",
              FW_VERSION, (unsigned long)(millis() / 1000), (unsigned)(ESP.getFreeHeap() / 1024), temperatureRead(),
              P.perfil, P.fuenteVel, P.autoBrillo, P.wifiOn, P.kmPorLitro, P.batFactor, P.gasMvVacio, P.gasMvLleno,
              g_modoDemo, g_rtcOk, g_imuOk, g_sdOk, g_tempOk, P.pistaMejor,
              // ota: hay una segunda partición para grabar el firmware nuevo (con "Huge APP" no la hay)
              (USAR_BLE && esp_ota_get_next_update_partition(NULL) != NULL) ? 1 : 0, USAR_WIFI ? 1 : 0,
              g_rele2, g_rele3, g_salida, g_alarma.activa ? 1 : 0, g_alarma.sens, g_alarma.sirena,
-             (PIN_MPU_INT >= 0 && g_imuOk) ? 1 : 0, g_llave.activa ? 1 : 0, g_vbActiva ? 1 : 0, g_vbCaptura ? 1 : 0, vibraMaduros());
+             (PIN_MPU_INT >= 0 && g_imuOk) ? 1 : 0, g_llave.activa ? 1 : 0, g_vbActiva ? 1 : 0, g_vbCaptura ? 1 : 0, vibraMaduros(), g_eHay ? 1 : 0, g_modoSeguro ? 1 : 0);
   for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%.0f", i ? "," : "", g_shiftActual[i]);
   out.print(F("],\"rm\":["));
   for (uint8_t i = 0; i < NUM_MARCHAS; i++) out.printf("%s%.1f", i ? "," : "", P.ratioMarcha[i]);
@@ -3741,6 +4366,7 @@ bool comandoDelicado(const String& low) {
   if (c0 == "ota" && c1 != "") return true;    // grabar firmware nuevo
   if (c0 == "casa" && c1 != "") return true;   // WiFi de tu casa y Telegram (claves)
   if ((c0 == "rele" || c0 == "alarma" || c0 == "vibra" || c0 == "llave") && c1 != "") return true;   // relevadores, alarma, IA, llave
+  if ((c0 == "e" || c0 == "errores") && c1 != "") return true;   // BOMBA y relevadores de la placa E, borrar la bitácora
   return false;
 }
 
@@ -3969,20 +4595,21 @@ String tgResponder(const String& o) {
     return (ok ? (bloquear ? "🔒 " : "🔓 ") : "⚠️ ") + r;
   }
   if (o == "/salud") {
-    ItemSalud it[5];
+    ItemSalud it[6];
     uint8_t n = saludCalcular(it);
     String t = "🔧 Estado de la moto\n";
     for (uint8_t i = 0; i < n; i++)
       t += String(it[i].puntos >= 80 ? "🟢 " : it[i].puntos >= 50 ? "🟡 " : "🔴 ") + it[i].nombre + " " + String(it[i].puntos) + "/100 · " + it[i].consejo + "\n";
     return t;
   }
+  if (o == "/errores") { String t = erroresTexto(false); return t.length() ? "🛡️ Bitácora de fallas\n" + t : String("🛡️ Sin fallas anotadas."); }
   if (o == "/semana") { String t = semanaTexto(); return t.length() ? t : String("Esta semana todavía no hay viajes."); }
   if (o == "/ubicacion" || o == "/ubicación") {
     double la, lo;
     if (!ubicLeer(la, lo)) return "No tengo ubicación guardada todavía.";
     return "📍 https://maps.google.com/?q=" + String(la, 6) + "," + String(lo, 6);
   }
-  return "Órdenes: /estado, /salud, /semana, /bloquear, /desbloquear, /ubicacion";
+  return "Órdenes: /estado, /salud, /errores, /semana, /bloquear, /desbloquear, /ubicacion";
 }
 
 /** Lee los mensajes nuevos de tu chat y los contesta. Recién encendida solo se salta lo pendiente: así una orden
@@ -4028,11 +4655,16 @@ void casaAlDespertar() {
   if (casaWifiConectar(10000)) {
     if (baja) { tgEnviar("⚠️ Batería de la moto baja: " + String(v, 2) + " V. Despertaré cada 4 h para cuidarla."); g_tgAvisoBat = true; }
     else if (!isnan(v) && v > BAT_GUARDA_V + 0.4f) g_tgAvisoBat = false;
+    guardianEnviar();
     tgRevisarMensajes();
     semanaRevisarEnvio();
   }
+#if USAR_LLAVERO
+  wifiSoltar();
+#else
   WiFi.disconnect(true);
   WiFi.mode(WIFI_OFF);
+#endif
 }
 
 // Empezó otra semana (lunes): manda el resumen de la que terminó (si no se pudo, se intenta en la siguiente revisión)
@@ -4058,6 +4690,7 @@ void casaTick() {
   if (!g_caida) g_tgAvisoCaida = false;
   if (millis() - g_tgUltimo < 30000) return;
   g_tgUltimo = millis();
+  guardianEnviar();
   tgRevisarMensajes();
   semanaRevisarEnvio();
 }
@@ -4162,7 +4795,7 @@ void ejecutarComando(String linea, Print& out) {
   // Lo que la app manda sola (ubicación cada segundo, consultas al conectarse) no cuenta como uso: con la llave
   // apagada y el teléfono cerca la tarjeta nunca se dormía y se comía la batería de la moto.
   bool automatico = c0 == "gps" || c0 == "hora" || c0 == "cfgjson" || c0 == "mantjson" || c0 == "tel" || c0 == "luz" ||
-                    c0 == "salud" ||
+                    c0 == "salud" || (c0 == "e" && c1 == "") || (c0 == "errores" && c1 == "") || (c0 == "ia" && c1 == "") ||
                     ((c0 == "av" || c0 == "casa" || c0 == "rele" || c0 == "alarma" || c0 == "vibra" || c0 == "llave") && c1 == "");
   if (!automatico) g_ultActividad = millis();
 
@@ -4279,7 +4912,7 @@ void ejecutarComando(String linea, Print& out) {
     else if (c1 == "off") {
       P.wifiOn = false;
 #if USAR_WIFI
-      WiFi.mode(WIFI_OFF);
+      wifiSoltar();
 #endif
     }
     nvsGuardar();
@@ -4301,6 +4934,9 @@ void ejecutarComando(String linea, Print& out) {
   else if (c0 == "salud") saludJson(out);
   else if (c0 == "llave") llaveComando(low, out);
   else if (c0 == "rele") releComando(low, out);
+  else if (c0 == "e") placaEComando(low, out);
+  else if (c0 == "errores") erroresComando(low, out);
+  else if (c0 == "ia") iaComando(low, out);
   else if (c0 == "alarma") alarmaComando(low, out);
   else if (c0 == "vibra") vibraComando(low, out);
   else if (c0 == "luz") {          // lo manda la app (sensor de luz del teléfono, sin LDR): luz <0-100>, sin respuesta
@@ -4374,7 +5010,7 @@ void webBegin() {
   // WiFi de casa: el que guardaste desde la app ("casa ssid/clave") o, si no, el del código (STA_SSID)
   bool casa = g_casa.ssid[0] != '\0';
   bool sta = casa || strcmp(STA_SSID, "X") != 0;
-  WiFi.mode(sta ? WIFI_AP_STA : WIFI_AP);
+  WiFi.mode((sta || g_llaveroOn) ? WIFI_AP_STA : WIFI_AP);   // el llavero escucha por la interfaz STA
   apClavePreparar();                       // ya con la radio prendida: el azar es de verdad
   WiFi.softAP(AP_SSID, g_apClave);
   if (casa) WiFi.begin(g_casa.ssid, g_casa.clave);
@@ -4719,6 +5355,9 @@ void irADormir(bool porTimer) {
     if (g_vbSucio) vibraGuardar(true);   // lo que aprendió la IA en este viaje
     periferico(false);
   }
+#if USAR_LLAVERO
+  txMotoParar();
+#endif
 #if USAR_WIFI
   WiFi.mode(WIFI_OFF);
 #endif
@@ -4726,6 +5365,9 @@ void irADormir(bool porTimer) {
   g_rele2 = g_rele3 = g_salida = false;
   g_sirenaHasta = 0;
   salidasAplicar();
+  placaEApagar();                        // BOMBA y relevadores de la placa E apagados (el PCF se queda así)
+  bitacoraGuardar();
+  iaGuardar(true);
   digitalWrite(PIN_CARGA, LOW);
   // Cada cuánto despierta: con Telegram lo que elegiste (15 min de fábrica); si no, cada hora.
   // Protector de batería: con la batería de la moto baja despierta cada 4 h (y casaAlDespertar no prende el WiFi).
@@ -4797,14 +5439,18 @@ void setup() {
   avanzadoBegin(); // funciones avanzadas: el pin del corte de chispa arranca suelto
   Wire.begin(PIN_I2C_SDA, PIN_I2C_SCL);
   Wire.setClock(100000);
+  placaEBegin();   // placa E: todo apagado lo antes posible (por si se reinició con la BOMBA prendida)
   g_rtcOk = rtc.begin(&Wire);
   if (g_rtcOk && rtc.lostPower()) rtc.adjust(DateTime(F(__DATE__), F(__TIME__)));
   sdBegin();
   casaCargar();    // WiFi de casa y Telegram (los usa también el despertar por reloj)
   alarmaCargar();
   llaveCargar();
+  llaveroCargar();
   semanaCargar();
   vibraCargar();
+  iaCargar();      // IA del motor (embrague y aceite)
+  guardianBegin(); // ¿por qué se reinició? bitácora de fallas y modo seguro
 
 #if USAR_DORMIR
   esp_sleep_wakeup_cause_t causa = esp_sleep_get_wakeup_cause();
@@ -4831,6 +5477,7 @@ void setup() {
   revisarAutodescarga();
   revisarCambioDia();
   diagnosticoInicial();
+  guardianComponentes();
 
   g_modoDemo = DEMO_AL_INICIAR;
 #if USAR_WIFI
@@ -4838,12 +5485,16 @@ void setup() {
   // Con la página WiFi apagada igual se conecta al WiFi de casa (para Telegram), sin esperar
   if (!g_wifiIniciado && g_casa.ssid[0]) { WiFi.mode(WIFI_STA); WiFi.begin(g_casa.ssid, g_casa.clave); }
 #endif
+#if USAR_LLAVERO
+  if (g_llaveroOn && !txMotoIniciar()) Serial.println(F("Llavero: no arrancó ESP-NOW"));
+#endif
 #if USAR_BLE
   bleBegin();
 #endif
   g_ultActividad = millis();
   g_ultIgnOn = millis();
   g_ultTick = millis();
+  guardianVigilar();   // desde aquí, si loop() se traba 30 s la tarjeta se reinicia sola
   Serial.printf("FT150TS %s listo. Escribe 'ayuda'.\n", FW_VERSION);
   if (g_modoDemo) Serial.println(F("Arrancó en MODO DEMO (escribe 'real' para sensores)."));
 }
@@ -4864,6 +5515,9 @@ void loop() {
 #if USAR_WIFI
   if (g_wifiIniciado) server.handleClient();
 #endif
+#if USAR_LLAVERO
+  txMotoTick();
+#endif
 
   if (ms - g_ultTick >= TICK_MS) {
     uint32_t dt = ms - g_ultTick;
@@ -4873,6 +5527,7 @@ void loop() {
     revisarCaidasYFrenadas();
     motorActualizar();
     viajeActualizar(dt);
+    iaMotorTick(dt);
     pistaActualizar();
     tempHistorial();
     static uint8_t cuenta = 0;
@@ -4882,12 +5537,13 @@ void loop() {
     entradasActualizar(dt);
     cargaActualizar();
     salidasAplicar();
+    placaETick();
     alarmaTick();
     llaveTick();
   }
-  vibraActualizar();
+  if (!g_modoSeguro) vibraActualizar();
 
-  ledsActualizar();
+  if (!g_modoSeguro) ledsActualizar();
 
   if (g_reiniciarEn && (int32_t)(ms - g_reiniciarEn) >= 0) ESP.restart();
 
@@ -4903,6 +5559,7 @@ void loop() {
     if (!datos.ignicion && !g_motorEnc && P.epochDormir == 0 && ms - g_ultIgnOn > 7200000UL)
       registrarReposoDiario(datos.vMoto);
     backupAutomatico();
+    guardianTick();
   }
   if (ms - g_ultLogBat > LOG_BAT_MS) { g_ultLogBat = ms; logBaterias(); }
   if (g_nvsSucio && ms - g_ultimoGuardado > 300000) nvsGuardar();

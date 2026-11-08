@@ -309,6 +309,10 @@ object Moto {
                 }
                 "x" -> viaje.value = Protocolo.parseViaje(j)
                 "d" -> FuncionesAvanzadas.recibirDiagnostico(j)
+                "w" -> {                                            // el guardián de la tarjeta anotó una falla
+                    avisoLocal("La tarjeta detectó una falla: míralo en Moto, Guardián de la tarjeta")
+                    PlacaB.pedirErrores()
+                }
                 "m" -> Vigilancia.movimientoExterno()              // la tarjeta sintió que movieron la moto
                 "b" -> Baches.registrarDeTarjeta(j.optDouble("la"), j.optDouble("lo"), j.optDouble("f", 0.0).toFloat())
                 "g" -> avisoLocal("Cargaste ~${fmt1(j.optDouble("l", 0.0))} L de gasolina" +

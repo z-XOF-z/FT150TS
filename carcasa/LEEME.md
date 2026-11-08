@@ -87,12 +87,17 @@ Si se necesitara más precisión que la del FDM: resina (SLA, ±0.05 mm) o impri
 
 ## Cómo imprimir
 
-- **Bandeja:** ASA/PETG, capa 0.2, 4 paredes, 30 % gyroid, piso en la cama, sin soportes (las ventanas laterales son
-  ranuras pequeñas).
-- **Marco:** cara frontal en la cama (ya viene girado), 4 paredes, sin soportes.
-- **Socket fijo:** placa en la cama, 5 paredes, 50 % infill; soportes **solo** dentro del hueco de la bola.
-- **Socket móvil:** cara de la abertura en la cama (ya viene girado), 5 paredes, 50 %.
-- **Perilla:** plana en la cama, 3 paredes, 30 %.
+Perfil reforzado para la moto (2026-10-30). El CAD es macizo: lo hueco lo decide el laminador. En PETG/ASA la fuerza la dan
+sobre todo las paredes; 5-6 paredes dejan prácticamente macizas las partes de 2-4 mm.
+
+- **Bandeja:** ASA/PETG, capa 0.2, 5 paredes, 6 capas arriba y abajo, 50 % gyroid, piso en la cama, sin soportes (las
+  ventanas laterales son ranuras pequeñas). No al 100 %: más peso = más palanca sobre la bola.
+- **Marco:** cara frontal en la cama (ya viene girado), 5 paredes, 50 %, sin soportes.
+- **Socket fijo:** placa en la cama, 6 paredes, **100 %** (maciza; +~20 g); soportes **solo** dentro del hueco de la bola.
+- **Socket móvil:** cara de la abertura en la cama (ya viene girado), 6 paredes, **100 %**.
+- **Perilla:** plana en la cama, 5 paredes, 50 %.
+- **Vibración:** pon un amortiguador (de los de RAM / Quad Lock) o un aro de hule entre la bola y el brazo: la vibración
+  del motor puede dañar el estabilizador (OIS) de la cámara del teléfono.
 
 ## Armado
 

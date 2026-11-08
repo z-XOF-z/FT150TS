@@ -127,7 +127,29 @@ data class ConfigMoto(
     val vibraCaptura: Boolean = false,
     val vibraMaduros: Int = 0,
     val llave: Boolean = false,    // llave de proximidad prendida (apagada de fábrica)
+    // Firmware v1.8+: llavero TamaXOF (ESP-NOW)
+    val llavero: Boolean = true,        // la tarjeta escucha al llavero
+    val llaveroCerca: Boolean = false,  // el llavero se presentó hace menos de 15 s
+    val paroLlavero: Boolean = false,   // paro de motor puesto desde el llavero (se quita al quitar la llave)
+    // Firmware v1.7+
+    val placaE: Boolean = false,   // la placa E (expansión I2C, PCF8574 0x20) contesta
+    val modoSeguro: Boolean = false, // el guardián apagó lo no indispensable tras 3 reinicios por falla
 )
+
+/** Placa E (comando "e", firmware v1.7+). Salidas: BOMBA, relevador 2, relevador 3, salida aislada. */
+data class PlacaEEstado(
+    val hay: Boolean = false,
+    val salidas: List<Boolean> = List(4) { false },
+    val entradas: List<Boolean> = List(4) { false },   // true = la entrada tiene voltaje
+    val bombaResta: Int = -1,      // segundos que le quedan a la BOMBA (-1 = apagada)
+    val descanso: Int = 0,         // segundos que la BOMBA debe descansar
+    val corto: Int = 0,            // bits de salidas que se leen al revés
+    val motivo: String = "",       // por qué se apagó la BOMBA la última vez
+)
+
+/** Un renglón de la bitácora del guardián (comando "errores", firmware v1.7+). */
+data class ErrorTarjeta(val epoch: Long, val codigo: Int, val texto: String)
+data class ErroresTarjeta(val lista: List<ErrorTarjeta>, val modoSeguro: Boolean, val tempChip: Int, val memoriaKb: Int)
 
 /** Un componente del "estado de la moto" (comando "salud", firmware v1.6+): 0-100 y qué hacer. */
 data class ComponenteSalud(val nombre: String, val puntos: Int, val consejo: String)
@@ -266,6 +288,8 @@ object Protocolo {
             vibraCaptura = o.optInt("vc", 0) == 1,
             vibraMaduros = o.optInt("vm", 0),
             llave = o.optInt("ll", 0) == 1,
+            placaE = o.optInt("pe", 0) == 1,
+            modoSeguro = o.optInt("seg", 0) == 1,
         )
     } catch (e: Exception) {
         null
@@ -306,6 +330,34 @@ object Protocolo {
     fun parseSalud(texto: String): List<ComponenteSalud>? = try {
         val a = JSONObject(texto.trim()).getJSONArray("salud")
         (0 until a.length()).map { i -> a.getJSONObject(i).let { ComponenteSalud(it.optString("c"), it.optInt("p", 0), it.optString("t")) } }
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Respuesta de "e": {"e":{"hay":1,"s":[b,r2,r3,s],"in":[1,0,0,0],"bt":120,"des":0,"corto":0,"mot":"..."}} */
+    fun parsePlacaE(texto: String): PlacaEEstado? = try {
+        val o = JSONObject(texto.trim()).getJSONObject("e")
+        val s = o.optJSONArray("s")
+        val i = o.optJSONArray("in")
+        PlacaEEstado(
+            hay = o.optInt("hay", 0) == 1,
+            salidas = List(4) { k -> s?.optInt(k, 0) == 1 },
+            entradas = List(4) { k -> i?.optInt(k, 0) == 1 },
+            bombaResta = o.optInt("bt", -1), descanso = o.optInt("des", 0), corto = o.optInt("corto", 0),
+            motivo = o.optString("mot", ""),
+        )
+    } catch (e: Exception) {
+        null
+    }
+
+    /** Respuesta de "errores": {"err":[{"t":epoch,"c":1,"x":"..."}],"seguro":0,"tc":45,"hp":180} */
+    fun parseErrores(texto: String): ErroresTarjeta? = try {
+        val o = JSONObject(texto.trim())
+        val a = o.getJSONArray("err")
+        ErroresTarjeta(
+            (0 until a.length()).map { k -> a.getJSONObject(k).let { ErrorTarjeta(it.optLong("t", 0), it.optInt("c", 0), it.optString("x")) } }.reversed(),
+            o.optInt("seguro", 0) == 1, o.optInt("tc", 0), o.optInt("hp", 0),
+        )
     } catch (e: Exception) {
         null
     }

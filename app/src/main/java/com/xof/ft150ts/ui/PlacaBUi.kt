@@ -78,6 +78,16 @@ internal fun SeccionPlacaB() {
         FilaSwitch("Llave de proximidad", "Al girar la llave, la moto no arranca hasta que se conecte tu teléfono vinculado " +
             "(el POCO o tu iPhone) o escribas el código con los botones: arriba, arriba, abajo, OK. Nunca bloquea rodando.",
             c.llave, Paleta.ambar) { PlacaB.llave(it) }
+        LaunchedEffect(Unit) { PlacaB.pedirLlave() }
+        FilaSwitch("Llavero TamaXOF", "La tarjeta escucha a tu llavero (cifrado): libera la llave de proximidad, " +
+            "paro de motor, bloquear, prestar moto y buscar. Apagado, la moto ignora al llavero.",
+            c.llavero, Paleta.ambar) { PlacaB.llavero(it) }
+        Dato("Llavero", when {
+            !c.llavero -> "apagado"
+            c.paroLlavero -> "PARO puesto (quita la llave para soltarlo)"
+            c.llaveroCerca -> "cerca"
+            else -> "no se ha presentado"
+        }, if (c.paroLlavero) Paleta.ambar else Paleta.texto)
 
         EtiquetaPixel("ia de vibraciones", Paleta.lima, 7.sp)
         FilaSwitch("Aprender cómo vibra tu moto", "Mientras ruedas aprende lo normal en cada rango de RPM y te avisa si algo " +

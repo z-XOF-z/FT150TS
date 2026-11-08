@@ -27,12 +27,14 @@ Tablero digital para la moto **Italika FT150TS**, en tres partes que trabajan ju
 | `firmware/ft150ts_dashboard/` | El `.ino` (~4 150 líneas) + `certificados.h` (raíces de api.telegram.org, vencen en 2037) |
 | `firmware/simulador_wokwi/` | Copia del sketch + `diagram.json` para simular en Wokwi/Velxio |
 | `firmware/HARDWARE-CORTE-CHISPA.md` | Circuito del corte de chispa (PC817 + IRF840) |
-| `docs/` | `CARPLAY.md`, `AHORRO_NOCTURNO.md`, `SOS.md`, `RELEASE.md`, este mapa |
+| `docs/` | `CARPLAY.md`, `AHORRO_NOCTURNO.md`, `SOS.md`, `RELEASE.md`, `ESP32_ARRANQUE_XMC.md` (arranque, particiones y falla XMC del N16R8), este mapa |
+| `bootloader_reparado_XMC.bin` | Bootloader de 2.ª etapa con parche XMC `0x70` (ESP-IDF 5.4.2 local). Se graba solo en `0x0`; ver `docs/ESP32_ARRANQUE_XMC.md` |
 | `releases/` | APK de cada versión + `NOTAS-v*.md` (la app muestra las notas como "qué hay de nuevo") |
 | `modulo-magisk/` | Módulo "ft150ts_sin_barra": quita la barra de 3 puntos de las ventanas libres (CarPlay) |
 | `scripts/` | Diagnósticos de solo lectura por ADB (`diagnostico-carplay.ps1`, `diagnostico-energia.ps1`) |
 | `pcb/` | Diseño de la placa base (ver la sección Placas) |
 | `carcasa/` | Piezas 3D (ver la sección Piezas 3D) |
+| `llavero/` | **TamaXOF**, el llavero (ESP32-C3 SuperMini + OLED 0.96" + TP4056 + pila de control de PS4). `firmware/tamaxof/` es el llavero: caritas, llave por ESP-NOW cifrada, paro de motor, música BLE y extras. `moto/tamaxof_moto.h` es el lado moto, **todavía no está en el .ino**. `moto/probador_moto/` es una moto falsa para la mesa. `comun/` tiene el protocolo y la clave (`generar_secreto.py`, la clave no se sube). `pcb/generar_placa.py` es la placa casera de una cara con planchado y revisión de cortos y separación. `carcasa/carcasa_tamaxof.py` es la caja con revisión de choques. Todo explicado en `llavero/LEEME.md` |
 
 ## App: archivos por área
 
@@ -70,6 +72,8 @@ Archivos `*Logica.kt`: lógica pura sin Android, para que se pueda probar en `ap
 | 1076–1617 | 14) Pantalla · 15) Mantenimiento · 16) Viajes · 17) Motor · 18) Baterías · 19) Shift light · 20) Modo pista · 21) Corte de motor |
 | 1617 | 21b) Funciones avanzadas (`USAR_CORTE_CHISPA 0`, tarea FreeRTOS `tareaChispa`) |
 | ~1850 | 21c) Placa B: entradas (freno, direccional olvidada), relevadores 2/3 y salida (`rele`), carga de la celda · 21d) Alarma de movimiento (`alarma`, MPU en modo ciclo + INT despierta a la tarjeta, 20 s para girar la llave) · 21e) IA de vibraciones (`vibra`: FIFO del MPU a 100 Hz, Goertzel, promedio y variación por rango de 500 rpm, alerta > 3.5) |
+| ~2530 | 21g) Placa E (`placaETick`, PCF8574 0x20 leído cada 100 ms, BOMBA con tope 10 min/descanso 5, corte por batería < 10.5 V o moto en movimiento; `FUNCION_E` para sus 4 entradas) · 21h) Guardián (`guardianBegin/Tick/Vigilar`: vigilante de 30 s en loop, motivo del reinicio, modo seguro tras 3 fallas, temperatura del chip, memoria, regulador, componentes; bitácora NVS de 12 renglones → Telegram y evento `w`) |
+| ~2900 | 21i) IA del motor (`iaMotorTick`: embrague que patina = relación RPM/vel vs lo aprendido a velocidad constante por marcha (Welford), acelerando en 3a+; aceite por km efectivos con factor por RPM/temperatura/frío; NVS "ia"; comando `ia`, renglón "Embrague" en `salud`). `USAR_PLACA_E` (sección 0) apaga la búsqueda de la placa E |
 | ~2300 | 21f) IA de baches (`bachesRevisar`, adaptativa, `baches.csv` + evento `b`), estado de los componentes (`salud`), llave de proximidad (`llave`, APAGADA de fábrica, código de botones), resumen semanal (Telegram los lunes) |
 | 1851–2310 | 22) Alertas · 23) Vistas · 24) Menú · 25) Modo demo · 26) Lectura real |
 | 2328 / 2478 | 27) Notificaciones · 27b) iPhone |
@@ -90,7 +94,8 @@ Archivos `*Logica.kt`: lógica pura sin Android, para que se pueda probar en `ap
   - **Registros:** `sd lista` → `@SDL [...]`; `sd leer <archivo> <desde>` → `@SD archivo desde n total\n` + texto.
   - **Casa:** `casa` → `{"casa":1,...}` (sin claves); `casa ssid|clave|tg|cada|prueba|borrar`.
   - Delicados (solo enlace cifrado o USB): `ota …`, `casa …`, `borrar`, `dormir`.
-- **Eventos de la tarjeta a la app:** `m` (movieron la moto), `b` (bache), `g` (cargaste gasolina), por `bleEvento`.
+- **Eventos de la tarjeta a la app:** `m` (movieron la moto), `b` (bache), `g` (cargaste gasolina), `w` (el guardián anotó una falla), por `bleEvento`.
+- **v1.7 / app 3.11.0-beta.2:** `e` → `{"e":{"hay","s":[bomba,r2,r3,sal],"in":[4],"bt","des","corto","mot"}}`; `e bomba|2|3|s on [seg]|off` (delicado). `errores` → `{"err":[{t,c,x}],"seguro","tc","hp"}`; `errores borrar`. cfgjson trae `pe` (placa E) y `seg` (modo seguro). Telegram `/errores`. App: `ui/PlacaEUi.kt` (`SeccionPlacaE`, `SeccionGuardian`), `PlacaB.placaE/errores`, prueba `PlacaETest`.
 - **Telegram:** también `/salud` y `/semana`. La tarjeta despierta cada `casa cada` min (15 de fábrica), se conecta a tu WiFi, avisa (batería baja, la movieron) y obedece `/estado`, `/bloquear`, `/desbloquear` y `/ubicacion`, solo de tu chat. Con la batería de la moto < 11.8 V despierta cada 4 h y no prende el WiFi.
 
 ## Placas (`pcb/`)
@@ -104,6 +109,7 @@ Archivos `*Logica.kt`: lógica pura sin Android, para que se pueda probar en `ap
 | `extras/` | Placas E (expansión I2C), F (fusibles) y P (perforada) |
 | `fabricar/<X>_JLCPCB/` | Gerbers en zip, listos para JLCPCB |
 | `LISTA_COMPRAS.md`, `LEEME.md` | Piezas (tiendas de México) y guía |
+| `guia_armado_B.html` | Guía interactiva para soldar la B (publicada como artifact "Armado Placa B"). `agregar_cuerpos_guia.py` le dibuja las piezas en su posición real leyendo `ft150ts_B.kicad_pcb` con `leer_huellas.py` (capas, zoom, altura y orden); se puede volver a correr |
 
 **Pines de la placa B:** ya aplicados en el firmware v1.6 (sección 2). Relevadores 40/38/45 (alto = prendido), carga 43, entradas aisladas 21 llave / 18 neutral / 3 freno / 46 direccionales (LOW = el cable tiene voltaje), salida 44, corte de chispa 47, quickshifter 48 y la INT del MPU en GPIO5 (J11, en lugar de la LDR). Guía: `pcb/ARMADO.md`.
 
@@ -145,9 +151,10 @@ Archivos `*Logica.kt`: lógica pura sin Android, para que se pueda probar en `ap
 - **Firmware:**
   - No actualizar el core del ESP32 a 3.3 (NimBLE rompe el BLE).
   - Con la N16R8 no usar GPIO35–37 (los ocupa la PSRAM).
+  - Falla `XMC flash startup fail`: es del bootloader, no del `.ino`. No usar "Subir" ni `merged`/`-completo.bin` (reponen el bootloader sin parche); la app va sola a `0x10000` ("Subir con programador"). Detalles en `docs/ESP32_ARRANQUE_XMC.md`.
 - **Arduino:** un `struct` que use una función con prototipo automático tiene que ir arriba, con los tipos (sección 1). Si no, falla con "was not declared".
 - **Placas:**
   - El archivo de reglas de Freerouting debe llamarse igual que el DSN.
   - Una pieza del lado equivocado del DevKit hace que Freerouting reporte "0 sin rutear" sin haberla ruteado: siempre revisar el DRC.
 
-Última revisión: 2026-10-29 (v3.11.0, firmware v1.6, placa B v2.3)
+Última revisión: 2026-10-30 (v3.11.0-beta.2, firmware v1.7 con placa E y guardián, placa B v2.3)

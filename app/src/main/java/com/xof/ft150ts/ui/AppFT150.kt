@@ -200,7 +200,10 @@ private fun Principal(
     // collectAsState (no ...WithLifecycle) a propósito: tiene que enterarse justo cuando se deja de ver.
     val enPantalla by Lanzador.enPantalla.collectAsState()
     val cpTapaAuto by CarPlayPestana.visible.collectAsStateWithLifecycle()
-    val irA: (Int) -> Unit = { i -> scope.launch { pager.animateScrollToPage(i) } }
+    // Al tocar una pestaña: deslizamiento suave (arranca rápido y frena al llegar)
+    val irA: (Int) -> Unit = { i ->
+        scope.launch { pager.animateScrollToPage(i, animationSpec = tween(340, easing = androidx.compose.animation.core.FastOutSlowInEasing)) }
+    }
 
     // CarPlay en modo Pestaña (root): aparece al estar en Auto y se esconde (sin cortar la sesión) al deslizar a otra
     // pestaña, al irte a otra app o en reposo. Sin root no se abre solo (en pantalla completa taparía FT150TS en ciclo).
@@ -256,7 +259,15 @@ private fun Principal(
                 // las que no se ven dejan de actualizarse (ver enVivo()).
                 // Rendimiento: cada página en su propia capa. Al deslizar, el pager solo mueve la capa; sin esto el hilo
                 // principal volvía a grabar el dibujo completo de las páginas en cada cuadro del deslizamiento.
-                Box(Modifier.fillMaxSize().graphicsLayer()) {
+                // Transición: la página que sale se aleja un poco (más chica y tenue) y la que llega se acerca. Se lee en
+                // la fase de dibujo (dentro de graphicsLayer {}): no recompone nada mientras deslizas.
+                Box(Modifier.fillMaxSize().graphicsLayer {
+                    val lejos = kotlin.math.abs(pager.currentPage - pagina + pager.currentPageOffsetFraction).coerceIn(0f, 1f)
+                    val s = 1f - 0.06f * lejos
+                    scaleX = s; scaleY = s
+                    // Sin transparencia a propósito: con alpha, Android dibujaba cada página completa en otra capa (o la
+                    // volvía a grabar) en cada cuadro: medido, mediana de 11 a 19-21 ms al deslizar. Escalar es casi gratis.
+                }) {
                     when (pagina) {
                         0 -> PantallaApps()
                         1 -> PantallaTablero()

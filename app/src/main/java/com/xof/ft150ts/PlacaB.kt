@@ -18,6 +18,8 @@ object PlacaB {
     val nombres = MutableStateFlow(NOMBRES_FABRICA)
     val vibra = MutableStateFlow<VibraEstado?>(null)
     val salud = MutableStateFlow<List<ComponenteSalud>>(emptyList())
+    val placaE = MutableStateFlow<PlacaEEstado?>(null)
+    val errores = MutableStateFlow<ErroresTarjeta?>(null)
 
     private var prefs: SharedPreferences? = null
     private val CODIGO = listOf("2", "3", "s")
@@ -52,6 +54,21 @@ object PlacaB {
     fun pedirVibra() = Moto.comandoSilencioso("vibra")
     fun pedirSalud() = Moto.comandoSilencioso("salud")
     fun llave(on: Boolean) = Moto.comandoSilencioso("llave ${if (on) "on" else "off"}")
+    /** Llavero TamaXOF (firmware v1.8+). "llave" sola pide el estado. */
+    fun llavero(on: Boolean) = Moto.comandoSilencioso("llave llavero ${if (on) "on" else "off"}")
+    fun pedirLlave() = Moto.comandoSilencioso("llave")
+
+    // Placa E (firmware v1.7+): [i] 0 = BOMBA, 1 = relevador 2, 2 = relevador 3, 3 = salida aislada
+    private val CODIGO_E = listOf("bomba", "2", "3", "s")
+    fun pedirE() = Moto.comandoSilencioso("e")
+    fun salidaE(i: Int, on: Boolean, segundos: Int = 0) {
+        val extra = if (on && segundos > 0) " $segundos" else ""
+        Moto.comandoSilencioso("e ${CODIGO_E[i]} ${if (on) "on" else "off"}$extra")
+    }
+
+    // Guardián (firmware v1.7+)
+    fun pedirErrores() = Moto.comandoSilencioso("errores")
+    fun borrarErrores() = Moto.comandoSilencioso("errores borrar")
 
     /** Respuestas JSON de "rele", "alarma" y "vibra" (las manda Moto). true = era de aquí. */
     fun recibir(t: String): Boolean {
@@ -64,9 +81,15 @@ object PlacaB {
                     alarmaPosible = o.optInt("ok", 0) == 1,
                 )
             } catch (_: Exception) { }
+            t.startsWith("{\"e\":{") -> Protocolo.parsePlacaE(t)?.let { placaE.value = it }
+            t.startsWith("{\"err\"") -> Protocolo.parseErrores(t)?.let { errores.value = it }
             t.startsWith("{\"salud\"") -> Protocolo.parseSalud(t)?.let { salud.value = it }
             t.startsWith("{\"ll\"") -> try {
-                Moto.config.value = Moto.config.value?.copy(llave = JSONObject(t).optInt("ll", 0) == 1)
+                val o = JSONObject(t)
+                Moto.config.value = Moto.config.value?.copy(
+                    llave = o.optInt("ll", 0) == 1, llavero = o.optInt("tx", 1) == 1,
+                    llaveroCerca = o.optInt("txc", 0) == 1, paroLlavero = o.optInt("paro", 0) == 1,
+                )
             } catch (_: Exception) { }
             t.startsWith("{\"vb\"") -> Protocolo.parseVibra(t)?.let { v ->
                 vibra.value = v

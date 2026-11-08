@@ -43,7 +43,7 @@ Le das 12 V de la moto en la bornera **12V MOTO** (bobinas de los relevadores).
 | Bornera 5 mm: 2 pines x1, 3 pines x2, 4 pines x1 | 4 |
 | Bornera 3.5 mm: 2 pines x1, 5 pines x1 | 2 |
 
-**Firmware:** falta agregar el soporte del PCF8574. Va en la siguiente versión del firmware, junto con los pines de la placa B.
+**Firmware:** v1.7 ya la maneja (sección 21g): comando `e`, tarjeta "Placa E" en la app, todo se apaga al arrancar y al dormir. Límites de cada bornera y cómo conectar un inflador grande: pestaña "Límites y gasolina" de `pcb/guia_armado_B.html`.
 
 ## F: Fusibles
 12 V de la batería entran por **BAT 12V** y salen por 6 salidas, cada una con su fusible de vidrio 5x20.
